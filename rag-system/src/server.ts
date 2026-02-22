@@ -1,5 +1,4 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
 import { loadConfig, getConfig } from './config.js';
 import { qdrantClient } from './database/qdrant-client.js';
 import { initialize as initEmbeddings, embed } from './embeddings.js';
@@ -10,10 +9,7 @@ import {
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
-
-loadConfig();
+app.use(express.json({ limit: '16kb' }));
 
 interface SearchRequest {
   query: string;
@@ -114,10 +110,7 @@ app.post('/api/search', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Search error:', error);
-    res.status(500).json({
-      error: 'Search failed',
-      message: error.message,
-    });
+    res.status(500).json({ error: 'Search failed' });
   }
 });
 
@@ -132,10 +125,8 @@ app.get('/api/stats', async (_req: Request, res: Response) => {
       status: collectionInfo.status,
     });
   } catch (error: any) {
-    res.status(500).json({
-      error: 'Failed to get stats',
-      message: error.message,
-    });
+    console.error('Stats error:', error);
+    res.status(500).json({ error: 'Failed to get stats' });
   }
 });
 
@@ -149,10 +140,8 @@ app.post('/api/ingest', async (_req: Request, res: Response) => {
       vectorsIndexed: collectionInfo.points_count,
     });
   } catch (error: any) {
-    res.status(500).json({
-      error: 'Ingestion failed',
-      message: error.message,
-    });
+    console.error('Ingestion error:', error);
+    res.status(500).json({ error: 'Ingestion failed' });
   }
 });
 
@@ -161,6 +150,7 @@ let ingestionTimer: ReturnType<typeof setInterval> | null = null;
 
 async function startServer() {
   try {
+    loadConfig();
     const config = getConfig();
 
     console.log('Initializing services...');

@@ -194,15 +194,21 @@ export async function runBackfillIfNeeded(): Promise<void> {
  * to handle cases where more than one batch arrived since last poll.
  */
 export async function runIngestionCycle(): Promise<void> {
+  const MAX_ITERATIONS = 50;
   try {
     let totalIngested = 0;
     let batchCount: number;
+    let iterations = 0;
 
     do {
       batchCount = await ingestNewMessages();
       totalIngested += batchCount;
-    } while (batchCount > 0);
+      iterations++;
+    } while (batchCount > 0 && iterations < MAX_ITERATIONS);
 
+    if (iterations >= MAX_ITERATIONS) {
+      console.warn(`Ingestion cycle hit iteration limit (${MAX_ITERATIONS})`);
+    }
     if (totalIngested > 0) {
       console.log(`Ingestion cycle complete: ${totalIngested} new messages`);
     }

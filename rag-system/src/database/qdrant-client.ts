@@ -3,6 +3,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { getConfig } from '../config.js';
 
 export interface MessagePayload {
+  [key: string]: unknown;
   message_id: string;
   chat_jid: string;
   sender: string;
