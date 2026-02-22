@@ -128,7 +128,7 @@ def load_credentials() -> google.oauth2.credentials.Credentials:
 
 
 def _save_credentials(credentials: google.oauth2.credentials.Credentials):
-    """Persist refreshed credentials back to disk."""
+    """Persist refreshed credentials back to disk (atomic write)."""
     cred_data = {
         "token": credentials.token,
         "refresh_token": credentials.refresh_token,
@@ -137,8 +137,11 @@ def _save_credentials(credentials: google.oauth2.credentials.Credentials):
         "client_secret": credentials.client_secret,
         "scopes": list(credentials.scopes) if credentials.scopes else [],
     }
-    with open(CREDENTIALS_PATH, "w") as f:
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(CREDENTIALS_PATH))
+    with os.fdopen(tmp_fd, "w") as f:
         json.dump(cred_data, f, indent=2)
+    os.replace(tmp_path, CREDENTIALS_PATH)
 
 
 def load_device_config() -> dict:

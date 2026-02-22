@@ -169,6 +169,7 @@ export function shutdownGoogleAssistant(): void {
   if (daemon && !daemon.killed) {
     daemon.kill();
     daemon = null;
+    daemonRL?.close();
     daemonRL = null;
     daemonReady = false;
   }
