@@ -33,6 +33,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import { shutdownGoogleAssistant } from './google-assistant.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
@@ -460,6 +461,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    shutdownGoogleAssistant();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
