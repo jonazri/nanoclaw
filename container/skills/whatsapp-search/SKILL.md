@@ -23,9 +23,11 @@ Semantic search over WhatsApp message history. Finds messages by meaning, not ju
 whatsapp-search:search() {
   local query="$1"
   local limit="${2:-10}"
+  local payload
+  payload=$(jq -n --arg q "$query" --argjson l "$limit" '{query: $q, limit: $l}')
   curl -s http://host.docker.internal:3847/api/search \
     -H "Content-Type: application/json" \
-    -d "{\"query\": \"$query\", \"limit\": $limit}" | jq .
+    -d "$payload" | jq .
 }
 ```
 
@@ -35,9 +37,11 @@ whatsapp-search:search() {
 whatsapp-search:search-filtered() {
   local query="$1"
   local group_name="$2"
+  local payload
+  payload=$(jq -n --arg q "$query" --arg g "$group_name" '{query: $q, filters: {groups: [$g]}}')
   curl -s http://host.docker.internal:3847/api/search \
     -H "Content-Type: application/json" \
-    -d "{\"query\": \"$query\", \"filters\": {\"groups\": [\"$group_name\"]}}" | jq .
+    -d "$payload" | jq .
 }
 ```
 
@@ -49,9 +53,11 @@ whatsapp-search:search-recent() {
   local days="${2:-7}"
   local start_date
   start_date=$(date -u -d "$days days ago" +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v-${days}d +%Y-%m-%dT%H:%M:%S.000Z)
+  local payload
+  payload=$(jq -n --arg q "$query" --arg s "$start_date" '{query: $q, filters: {dateRange: {start: $s}}}')
   curl -s http://host.docker.internal:3847/api/search \
     -H "Content-Type: application/json" \
-    -d "{\"query\": \"$query\", \"filters\": {\"dateRange\": {\"start\": \"$start_date\"}}}" | jq .
+    -d "$payload" | jq .
 }
 ```
 
