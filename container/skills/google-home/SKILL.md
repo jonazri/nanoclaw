@@ -8,27 +8,61 @@ allowed-tools: Bash(google-home:*)
 
 Control smart home devices by sending text commands to Google Assistant, and create automations using the Google Home YAML schema.
 
-## Device List
+## Device List — 1587 Carroll
 
-<!-- Update this list with your actual devices -->
+All lights are Govee (dimmable + color). Air filters are Coway Airmega. Temp/humidity sensors are Aqara.
 
-| Device | Room | Type | Notes |
-|--------|------|------|-------|
-| Living room lights | Living Room | Light | Dimmable, color |
-| Bedroom lights | Bedroom | Light | Dimmable |
-| Thermostat | Hallway | Thermostat | Heating/cooling |
-| Front door lock | Entryway | Lock | Smart lock |
-| Kitchen lights | Kitchen | Light | Dimmable, color |
-| TV | Living Room | Media | Chromecast |
+### Bedroom
+| Device | Type | Notes |
+|--------|------|-------|
+| Bedroom Lights | Light group | Contains: Bedroom Ceiling, Bedroom Dresser Left, Bedroom Dresser Right |
+| Bedroom Ceiling | Light | Part of Bedroom Lights group |
+| Bedroom Dresser Left | Light | Part of Bedroom Lights group |
+| Bedroom Dresser Right | Light | Part of Bedroom Lights group |
+| Bedroom AC | AC | |
+| Bedroom Air Filter | Air filter | Coway Airmega |
+| Nightlight | Light | |
+| Dresser | Light | |
+
+### Entryway
+| Device | Type | Notes |
+|--------|------|-------|
+| Entryway Lights | Light group | Contains: Entrance Ceiling, Hallway Ceiling |
+| Entrance Ceiling | Light | Part of Entryway Lights group |
+| Hallway Ceiling | Light | Part of Entryway Lights group |
+
+### Kitchen
+| Device | Type | Notes |
+|--------|------|-------|
+| Kitchen Counter | Light | |
+
+### Living Room
+| Device | Type | Notes |
+|--------|------|-------|
+| Living Room Lights | Light group | Contains: Couch Light, Kitchen Ceiling, Living Room Ceiling |
+| Couch Light | Light | Part of Living Room Lights group |
+| Kitchen Ceiling | Light | Part of Living Room Lights group |
+| Living Room Ceiling | Light | Part of Living Room Lights group |
+| Living room AC | AC | |
+| Temperature and Humidity Sensor | Sensor | Aqara, Living Room |
+
+### Office
+| Device | Type | Notes |
+|--------|------|-------|
+| Office Lights | Light group | Contains: Office Ceiling Light, Office Spotlight |
+| Office Ceiling Light | Light | Part of Office Lights group |
+| Office Spotlight | Light | Part of Office Lights group |
+| Office Air Filter | Air filter | Coway Airmega |
+| Office Temperature and Humidity Sensor | Sensor | Aqara |
+| Bedroom Temperature and Humidity Sensor | Sensor | Aqara, located in Office |
 
 ## Quick Start
 
 ```bash
 # Send a command to Google Assistant
 google-home:command "turn on the living room lights"
-google-home:command "set the thermostat to 72"
 google-home:command "dim the bedroom lights to 30 percent"
-google-home:command "lock the front door"
+google-home:command "turn on the office air filter"
 
 # Check if Google Assistant is healthy
 google-home:status
@@ -45,35 +79,35 @@ google-home:automation
 ### Lights
 
 ```bash
-google-home:command "turn on the kitchen lights"
+google-home:command "turn on the bedroom lights"
 google-home:command "turn off all the lights"
 google-home:command "set the living room lights to 50 percent"
-google-home:command "change the living room lights to blue"
-google-home:command "dim the bedroom lights"
+google-home:command "change the office lights to blue"
+google-home:command "dim the entryway lights"
+google-home:command "turn on the kitchen counter"
+google-home:command "set the couch light to warm white"
+google-home:command "turn on the nightlight"
 ```
 
-### Thermostat
+### AC
 
 ```bash
-google-home:command "set the thermostat to 72 degrees"
-google-home:command "turn on the heat"
-google-home:command "turn off the AC"
-google-home:command "what is the temperature inside"
+google-home:command "turn on the bedroom AC"
+google-home:command "turn off the living room AC"
 ```
 
-### Locks
+### Air Filters
 
 ```bash
-google-home:command "lock the front door"
-google-home:command "is the front door locked"
+google-home:command "turn on the bedroom air filter"
+google-home:command "turn off the office air filter"
 ```
 
-### Media
+### Sensors
 
 ```bash
-google-home:command "play music on living room TV"
-google-home:command "set volume to 50 on living room TV"
-google-home:command "pause the living room TV"
+google-home:command "what is the temperature in the living room"
+google-home:command "what is the humidity in the office"
 ```
 
 ### Scenes & Routines
