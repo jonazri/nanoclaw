@@ -50,13 +50,26 @@ def run_oauth_flow(client_secret_path: str) -> dict:
         sys.exit(1)
 
     print(f"\nUsing client secret: {client_secret_path}")
-    print("A browser window will open for Google sign-in.\n")
 
     flow = InstalledAppFlow.from_client_secrets_file(
         client_secret_path,
         scopes=[ASSISTANT_SCOPE],
+        redirect_uri="urn:ietf:wg:oauth:2.0:oob",
     )
-    credentials = flow.run_local_server(port=0)
+
+    # Generate the authorization URL for manual flow (works on headless servers)
+    auth_url, _ = flow.authorization_url(prompt="consent")
+
+    print("\nOpen this URL in your browser and authorize:\n")
+    print(f"  {auth_url}\n")
+    code = input("Paste the authorization code here: ").strip()
+
+    if not code:
+        print("ERROR: No authorization code provided.")
+        sys.exit(1)
+
+    flow.fetch_token(code=code)
+    credentials = flow.credentials
 
     # Serialize credentials so we can reload them later
     cred_data = {
@@ -70,13 +83,57 @@ def run_oauth_flow(client_secret_path: str) -> dict:
     return cred_data
 
 
-def register_device(project_id: str) -> dict:
-    """Create device model and instance IDs for the Google Assistant SDK."""
-    device_model_id = f"{project_id}-nanoclaw-{uuid.uuid4().hex[:8]}"
-    device_instance_id = f"nanoclaw-{uuid.uuid4().hex[:8]}"
+def register_device(project_id: str, access_token: str) -> dict:
+    """Register device model and instance with Google Assistant API."""
+    import requests
 
-    print(f"\n  Device model ID:    {device_model_id}")
-    print(f"  Device instance ID: {device_instance_id}")
+    device_model_id = f"{project_id}-nanoclaw-model"
+    device_instance_id = f"nanoclaw-instance-{uuid.uuid4().hex[:8]}"
+    base_url = "https://embeddedassistant.googleapis.com/v1alpha2"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    # Register device model
+    print("\nRegistering device model with Google...")
+    model_resp = requests.post(
+        f"{base_url}/projects/{project_id}/deviceModels/",
+        headers=headers,
+        json={
+            "device_model_id": device_model_id,
+            "project_id": project_id,
+            "device_type": "action.devices.types.LIGHT",
+            "manifest": {
+                "manufacturer": "NanoClaw",
+                "product_name": "NanoClaw Assistant",
+                "device_description": "Smart home controller",
+            },
+        },
+    )
+    if model_resp.status_code == 200:
+        print(f"  Device model registered: {device_model_id}")
+    elif model_resp.status_code == 409:
+        print(f"  Device model already exists: {device_model_id}")
+    else:
+        print(f"  Warning: model registration returned {model_resp.status_code}: {model_resp.text}")
+
+    # Register device instance
+    print("Registering device instance with Google...")
+    instance_resp = requests.post(
+        f"{base_url}/projects/{project_id}/devices/",
+        headers=headers,
+        json={
+            "id": device_instance_id,
+            "model_id": device_model_id,
+            "client_type": "SDK_SERVICE",
+            "nickname": "NanoClaw",
+        },
+    )
+    if instance_resp.status_code == 200:
+        print(f"  Device instance registered: {device_instance_id}")
+    else:
+        print(f"  Warning: instance registration returned {instance_resp.status_code}: {instance_resp.text}")
 
     device_config = {
         "project_id": project_id,
@@ -152,7 +209,7 @@ def main():
         print("ERROR: Project ID is required.")
         sys.exit(1)
 
-    device_config = register_device(project_id)
+    device_config = register_device(project_id, cred_data["token"])
 
     with open(DEVICE_CONFIG_PATH, "w") as f:
         json.dump(device_config, f, indent=2)
