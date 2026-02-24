@@ -113,7 +113,7 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
-    fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 2413, 1] }),
+    fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 0] }),
     makeCacheableSignalKeyStore: vi.fn((keys: unknown) => keys),
     useMultiFileAuthState: vi.fn().mockResolvedValue({
       state: {
@@ -189,6 +189,36 @@ describe('WhatsAppChannel', () => {
     triggerConnection('open');
     return p;
   }
+
+  // --- Version fetch ---
+
+  describe('version fetch', () => {
+    it('connects with fetched version', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      const { fetchLatestWaWebVersion } = await import('@whiskeysockets/baileys');
+      expect(fetchLatestWaWebVersion).toHaveBeenCalledWith({});
+    });
+
+    it('falls back gracefully when version fetch fails', async () => {
+      const { fetchLatestWaWebVersion } = await import('@whiskeysockets/baileys');
+      vi.mocked(fetchLatestWaWebVersion).mockRejectedValueOnce(new Error('network error'));
+      const { logger } = await import('../logger.js');
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      // Should still connect successfully despite fetch failure
+      expect(channel.isConnected()).toBe(true);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'Failed to fetch latest WA Web version, using default',
+      );
+    });
+  });
 
   // --- Connection lifecycle ---
 

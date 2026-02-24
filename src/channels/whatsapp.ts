@@ -64,7 +64,11 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-    const { version } = await fetchLatestWaWebVersion({});
+    // undefined version falls through to Baileys' built-in default
+    const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      return { version: undefined };
+    });
     this.sock = makeWASocket({
       version,
       auth: {
