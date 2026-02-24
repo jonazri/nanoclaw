@@ -14,8 +14,6 @@ console.log(`Migrating database at: ${dbPath}`);
 const db = new Database(dbPath);
 
 try {
-  db.pragma('foreign_keys = ON');
-
   db.transaction(() => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS reactions (
