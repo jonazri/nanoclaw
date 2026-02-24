@@ -337,6 +337,14 @@ sendReaction?(
 reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 ```
 
+### Document the MCP tool for the container agent
+
+Add to the "What You Can Do" section of `groups/main/CLAUDE.md` (and any other group CLAUDE.md files):
+
+```markdown
+- **React to messages** with emoji — use `mcp__nanoclaw__react_to_message` with an `emoji` param (e.g. "👍"). Omit `message_id` to react to the latest message, or pass a specific message ID
+```
+
 ### Validate code changes
 
 ```bash
