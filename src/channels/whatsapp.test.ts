@@ -205,6 +205,7 @@ describe('WhatsAppChannel', () => {
     it('falls back gracefully when version fetch fails', async () => {
       const { fetchLatestWaWebVersion } = await import('@whiskeysockets/baileys');
       vi.mocked(fetchLatestWaWebVersion).mockRejectedValueOnce(new Error('network error'));
+      const { logger } = await import('../logger.js');
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -212,6 +213,10 @@ describe('WhatsAppChannel', () => {
 
       // Should still connect successfully despite fetch failure
       expect(channel.isConnected()).toBe(true);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'Failed to fetch latest WA Web version, using default',
+      );
     });
   });
 

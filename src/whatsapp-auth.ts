@@ -54,6 +54,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     process.exit(0);
   }
 
+  // undefined version falls through to Baileys' built-in default
   const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
     logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
     return { version: undefined };
