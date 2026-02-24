@@ -7,7 +7,7 @@ description: Add WhatsApp emoji reaction support — receive, send, store, and s
 
 This skill adds complete emoji reaction support to NanoClaw's WhatsApp channel:
 - Receive and track reactions from WhatsApp
-- Send reactions programmatically
+- Send reactions from the container agent via MCP tool
 - Store reactions in SQLite with full history
 - Optional RAG integration for searching by reactions
 
@@ -18,14 +18,6 @@ This skill adds complete emoji reaction support to NanoClaw's WhatsApp channel:
 Read `.nanoclaw/state.yaml`. If `reactions` is in `applied_skills`, skip to Phase 4 (Verify). The code changes are already in place.
 
 ## Phase 2: Apply Code Changes
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
-
-```bash
-npx tsx scripts/apply-skill.ts --init
-```
 
 ### Apply the skill
 
@@ -169,9 +161,10 @@ export function getMessagesByReaction(
       ORDER BY r.timestamp DESC
     `;
 
+  type Result = Reaction & { content: string; sender_name: string; message_timestamp: string };
   return chatJid
-    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as any[])
-    : (db.prepare(sql).all(reactorJid, emoji) as any[]);
+    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
+    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
 }
 
 /**
@@ -210,9 +203,10 @@ export function getReactionStats(chatJid?: string): Array<{
       ORDER BY count DESC
     `;
 
+  type Result = { emoji: string; count: number };
   return chatJid
-    ? (db.prepare(sql).all(chatJid) as any[])
-    : (db.prepare(sql).all() as any[]);
+    ? (db.prepare(sql).all(chatJid) as Result[])
+    : (db.prepare(sql).all() as Result[]);
 }
 ```
 
@@ -345,9 +339,141 @@ sendReaction?(
 reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 ```
 
-### Document the capability for the container agent
+### Modify src/ipc.ts
 
-The `container/skills/reactions/SKILL.md` teaches the agent how and when to use `react_to_message`. Verify it exists and is synced on next container spawn.
+Add `sendReaction` to the `IpcDeps` interface:
+
+```typescript
+sendReaction: (jid: string, emoji: string, messageId?: string) => Promise<void>;
+```
+
+In the IPC message processing loop, add a handler for `type: 'reaction'` after the existing `type: 'message'` handler:
+
+```typescript
+} else if (data.type === 'reaction' && data.chatJid && data.emoji) {
+  const targetGroup = registeredGroups[data.chatJid];
+  if (
+    isMain ||
+    (targetGroup && targetGroup.folder === sourceGroup)
+  ) {
+    try {
+      await deps.sendReaction(data.chatJid, data.emoji, data.messageId);
+      logger.info(
+        { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+        'IPC reaction sent',
+      );
+    } catch (err) {
+      logger.error(
+        { chatJid: data.chatJid, emoji: data.emoji, sourceGroup, err },
+        'IPC reaction failed',
+      );
+    }
+  } else {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC reaction attempt blocked',
+    );
+  }
+}
+```
+
+### Modify src/index.ts
+
+Wire the `sendReaction` dependency in the `startIpcWatcher()` call. Import `getMessageFromMe` from `./db.js` and add:
+
+```typescript
+sendReaction: async (jid, emoji, messageId) => {
+  const channel = findChannel(channels, jid);
+  if (!channel) throw new Error(`No channel for JID: ${jid}`);
+  if (messageId) {
+    if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
+    const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
+    await channel.sendReaction(jid, messageKey, emoji);
+  } else {
+    if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+    await channel.reactToLatestMessage(jid, emoji);
+  }
+},
+```
+
+### Modify container/agent-runner/src/ipc-mcp-stdio.ts
+
+Add the `react_to_message` MCP tool after the existing `send_message` tool:
+
+```typescript
+server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z.string().describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
+    message_id: z.string().optional().describe('The message ID to react to. If omitted, reacts to the latest message in the chat.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Reaction ${args.emoji} sent.` }] };
+  },
+);
+```
+
+### Add container skill documentation
+
+Create `container/skills/reactions/SKILL.md` to teach the container agent how to use the tool:
+
+```markdown
+---
+name: reactions
+description: React to WhatsApp messages with emoji. Use when the user asks you to react, when acknowledging a message with a reaction makes sense, or when you want to express a quick response without sending a full message.
+---
+
+# Reactions
+
+React to messages with emoji using the `mcp__nanoclaw__react_to_message` tool.
+
+## When to use
+
+- User explicitly asks you to react ("react with a thumbs up", "heart that message")
+- Quick acknowledgment is more appropriate than a full text reply
+- Expressing agreement, approval, or emotion about a specific message
+
+## How to use
+
+### React to the latest message
+
+Omitting `message_id` reacts to the most recent message in the chat.
+
+### React to a specific message
+
+Pass a `message_id` to react to a specific message. Find message IDs by querying the messages database.
+
+### Remove a reaction
+
+Send an empty string emoji to remove your reaction.
+
+## Common emoji
+
+| Emoji | When to use |
+|-------|-------------|
+| 👍 | Acknowledgment, approval |
+| ❤️ | Appreciation, love |
+| 😂 | Something funny |
+| 🔥 | Impressive, exciting |
+| 🎉 | Celebration, congrats |
+| 🙏 | Thanks, prayer |
+| ✅ | Task done, confirmed |
+| ❓ | Needs clarification |
+```
+
+### Document the capability for the container agent
 
 Add a brief reference to the "What You Can Do" section of `groups/main/CLAUDE.md`:
 
@@ -394,7 +520,7 @@ sqlite3 store/messages.db "SELECT * FROM reactions ORDER BY timestamp DESC LIMIT
 
 ### Test sending reactions
 
-Ask Andy to react to a message via the `react_to_message` MCP tool, or use the container skill directly.
+Ask the agent to react to a message via the `react_to_message` MCP tool, or use the container skill directly.
 
 Check your phone — the reaction should appear on the message.
 
