@@ -202,6 +202,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Ensure all user messages are tracked — recovery messages enter processGroupMessages
+  // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
+  // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
+  for (const msg of missedMessages) {
+    statusTracker.markReceived(msg.id, chatJid, false);
+  }
+
   // Mark last user message as thinking (container is spawning)
   const lastUserMsg = [...missedMessages].reverse().find((m) => !m.is_from_me && !m.is_bot_message);
   if (lastUserMsg) {
@@ -233,6 +240,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      statusTracker.markAllDone(chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -269,8 +277,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  // Success — clear pipe tracking
-  statusTracker.markAllDone(chatJid);
+  // Success — clear pipe tracking (markAllDone already fired in streaming callback)
   delete cursorBeforePipe[chatJid];
   return true;
 }
@@ -552,7 +559,7 @@ async function main(): Promise<void> {
     },
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
-  await statusTracker.recover();
+  // Note: recover() is called AFTER channels connect, so reactions can actually be sent
 
   initShabbatSchedule();
 
@@ -582,6 +589,10 @@ async function main(): Promise<void> {
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
   await whatsapp.connect();
+
+  // Recover status tracker AFTER channels are connected, so recovery ❌ reactions
+  // can actually be sent via the WhatsApp channel.
+  await statusTracker.recover();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
