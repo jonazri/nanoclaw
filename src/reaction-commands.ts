@@ -22,28 +22,28 @@ const REACTION_COMMANDS: ReactionCommand[] = [
   { pattern: /thumbs?\s*down|👎/i, emoji: '👎', description: 'Thumbs down' },
 
   // Love/heart
-  { pattern: /\b(love|heart|❤️|❤)\b/i, emoji: '❤️', description: 'Heart/love' },
+  { pattern: /\b(?:love|heart)\b|❤️|❤/i, emoji: '❤️', description: 'Heart/love' },
 
   // Task/productivity
-  { pattern: /\b(check\s*mark|✅)\b/i, emoji: '✅', description: 'Check mark' },
-  { pattern: /\b(pin|bookmark|📌|🔖)\b/i, emoji: '📌', description: 'Pin/bookmark' },
-  { pattern: /\b(calendar|📅)\b/i, emoji: '📅', description: 'Calendar/schedule' },
-  { pattern: /\b(star|important|⭐)\b/i, emoji: '⭐', description: 'Important/star' },
+  { pattern: /\b(?:check\s*mark)\b|✅/i, emoji: '✅', description: 'Check mark' },
+  { pattern: /\b(?:pin|bookmark)\b|📌|🔖/i, emoji: '📌', description: 'Pin/bookmark' },
+  { pattern: /\b(?:calendar)\b|📅/i, emoji: '📅', description: 'Calendar/schedule' },
+  { pattern: /\b(?:star|important)\b|⭐/i, emoji: '⭐', description: 'Important/star' },
 
   // Questions
-  { pattern: /\b(question\s*mark|❓)\b/i, emoji: '❓', description: 'Question mark' },
-  { pattern: /\b(thinking\s*face|💭)\b/i, emoji: '💭', description: 'Thinking face' },
+  { pattern: /\b(?:question\s*mark)\b|❓/i, emoji: '❓', description: 'Question mark' },
+  { pattern: /\b(?:thinking\s*face)\b|💭/i, emoji: '💭', description: 'Thinking face' },
 
   // Emotions
-  { pattern: /\b(fire|🔥)\b/i, emoji: '🔥', description: 'Fire' },
-  { pattern: /\b(celebrate|party|congrats|🎉)\b/i, emoji: '🎉', description: 'Celebration' },
-  { pattern: /\b(pray|prayer|tefilla|🙏)\b/i, emoji: '🙏', description: 'Prayer' },
-  { pattern: /\b(laugh|lol|😂)\b/i, emoji: '😂', description: 'Laughing' },
+  { pattern: /\b(?:fire)\b|🔥/i, emoji: '🔥', description: 'Fire' },
+  { pattern: /\b(?:celebrate|party|congrats)\b|🎉/i, emoji: '🎉', description: 'Celebration' },
+  { pattern: /\b(?:pray|prayer|tefilla)\b|🙏/i, emoji: '🙏', description: 'Prayer' },
+  { pattern: /\b(?:laugh|lol)\b|😂/i, emoji: '😂', description: 'Laughing' },
 
   // Jewish-specific
-  { pattern: /\b(menorah|shabbat\s*shalom|🕎)\b/i, emoji: '🕎', description: 'Menorah' },
-  { pattern: /\b(torah|sefer|📜)\b/i, emoji: '📜', description: 'Scroll/Torah' },
-  { pattern: /\b(mitz(?:vah|va)|✨)\b/i, emoji: '✨', description: 'Mitzvah/sparkles' },
+  { pattern: /\b(?:menorah|shabbat\s*shalom)\b|🕎/i, emoji: '🕎', description: 'Menorah' },
+  { pattern: /\b(?:torah|sefer)\b|📜/i, emoji: '📜', description: 'Scroll/Torah' },
+  { pattern: /\b(?:mitz(?:vah|va))\b|✨/i, emoji: '✨', description: 'Mitzvah/sparkles' },
 ];
 
 /**
