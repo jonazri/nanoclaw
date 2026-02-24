@@ -560,6 +560,16 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (messageId) {
+        const messageKey = { id: messageId, remoteJid: jid, fromMe: false };
+        await channel.sendReaction!(jid, messageKey, emoji);
+      } else {
+        await channel.reactToLatestMessage!(jid, emoji);
+      }
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     unregisterGroup,
