@@ -33,6 +33,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import { shutdownGoogleAssistant } from './google-assistant.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
@@ -49,6 +50,9 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+// Tracks cursor value before messages were piped to an active container.
+// Used to roll back if the container dies after piping.
+let cursorBeforePipe: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
@@ -227,19 +231,29 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      // Output was sent for the initial batch, so don't roll those back.
+      // But if messages were piped AFTER that output, roll back to recover them.
+      if (cursorBeforePipe[chatJid]) {
+        lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
+        saveState();
+        logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        delete cursorBeforePipe[chatJid];
+        return false;
+      }
+      logger.warn({ group: group.name }, 'Agent error after output was sent, no piped messages to recover');
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // No output sent — roll back everything so the full batch is retried
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    delete cursorBeforePipe[chatJid];
     return false;
   }
 
+  // Success — clear pipe tracking
+  delete cursorBeforePipe[chatJid];
   return true;
 }
 
@@ -323,6 +337,14 @@ async function runAgent(
     if (output.status === 'error') {
       if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
         logger.warn({ group: group.name }, 'Auth error detected, refreshing token and retrying');
+        // Roll back any messages piped during the dead container's lifetime
+        // so they're not lost — the retry only replays the original prompt.
+        if (cursorBeforePipe[chatJid]) {
+          lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
+          delete cursorBeforePipe[chatJid];
+          saveState();
+          logger.info({ group: group.name }, 'Rolled back piped messages before auth retry');
+        }
         notifyMainGroup('[system] Auth token expired — refreshing and retrying.');
         const refreshed = await refreshOAuthToken();
         if (refreshed) {
@@ -432,6 +454,10 @@ async function startMessageLoop(): Promise<void> {
                 { chatJid, count: messagesToSend.length },
                 'Piped messages to active container',
               );
+              // Save cursor before first pipe so we can roll back if container dies
+              if (!cursorBeforePipe[chatJid]) {
+                cursorBeforePipe[chatJid] = lastAgentTimestamp[chatJid] || '';
+              }
               lastAgentTimestamp[chatJid] =
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
@@ -493,6 +519,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    shutdownGoogleAssistant();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

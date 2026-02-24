@@ -12,6 +12,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { sendGoogleAssistantCommand, resetGoogleAssistantConversation, googleAssistantHealth } from './google-assistant.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { isShabbatOrYomTov } from './shabbat.js';
@@ -179,6 +180,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    requestId?: string;
+    text?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -260,10 +263,21 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+
+        // Scheduled task results always go to the main (private) chat,
+        // never to a group. group_folder already identifies the context.
+        const mainJid = Object.entries(registeredGroups).find(
+          ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+        )?.[0];
+        if (!mainJid) {
+          logger.warn('Cannot schedule task: main group not registered');
+          break;
+        }
+
         createTask({
           id: taskId,
           group_folder: targetFolder,
-          chat_jid: targetJid,
+          chat_jid: mainJid,
           prompt: data.prompt,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
@@ -419,6 +433,56 @@ export async function processTaskIpc(
           logger.info({ sourceGroup }, 'OAuth token refreshed via IPC');
         }
       });
+      break;
+    }
+
+    case 'google_assistant_command': {
+      const requestId = data.requestId as string | undefined;
+      const text = data.text as string | undefined;
+
+      const writeIpcResponse = (reqId: string, response: object) => {
+        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(responsesDir, `${reqId}.json`);
+        const tempFile = `${responseFile}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify(response));
+        fs.renameSync(tempFile, responseFile);
+      };
+
+      if (!requestId || !text) {
+        logger.warn({ data }, 'Invalid google_assistant_command: missing requestId or text');
+        if (requestId) {
+          writeIpcResponse(requestId, {
+            status: 'error',
+            error: `Invalid google_assistant_command: missing ${!text ? 'text' : 'requestId'}`,
+          });
+        }
+        break;
+      }
+
+      try {
+        const result =
+          text === '__reset_conversation__'
+            ? await resetGoogleAssistantConversation()
+            : text === '__health__'
+              ? await googleAssistantHealth()
+              : await sendGoogleAssistantCommand(text);
+
+        // Surface empty responses as explicit errors
+        if (result.warning === 'no_response_text') {
+          result.status = 'error';
+          result.error = 'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
+        }
+
+        writeIpcResponse(requestId, result);
+        logger.info({ requestId, sourceGroup, text: text.slice(0, 50) }, 'Google Assistant command processed');
+      } catch (err) {
+        writeIpcResponse(requestId, {
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        });
+        logger.error({ err, requestId, sourceGroup }, 'Google Assistant command failed');
+      }
       break;
     }
 
