@@ -3,9 +3,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = process.env.STORE_DIR || path.join(process.cwd(), 'store');
 const dbPath = path.join(STORE_DIR, 'messages.db');
 

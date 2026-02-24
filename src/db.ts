@@ -700,9 +700,10 @@ export function getMessagesByReaction(
       ORDER BY r.timestamp DESC
     `;
 
+  type Result = Reaction & { content: string; sender_name: string; message_timestamp: string };
   return chatJid
-    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as any[])
-    : (db.prepare(sql).all(reactorJid, emoji) as any[]);
+    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
+    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
 }
 
 export function getReactionsByUser(
@@ -735,9 +736,10 @@ export function getReactionStats(chatJid?: string): Array<{
       ORDER BY count DESC
     `;
 
+  type Result = { emoji: string; count: number };
   return chatJid
-    ? (db.prepare(sql).all(chatJid) as any[])
-    : (db.prepare(sql).all() as any[]);
+    ? (db.prepare(sql).all(chatJid) as Result[])
+    : (db.prepare(sql).all() as Result[]);
 }
 
 // --- JSON migration ---
