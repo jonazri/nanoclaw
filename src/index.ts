@@ -22,6 +22,7 @@ import {
   getAllSessions,
   getAllTasks,
   getMessagesSince,
+  getMessageFromMe,
   getNewMessages,
   getRouterState,
   initDatabase,
@@ -565,7 +566,7 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (messageId) {
         if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
-        const messageKey = { id: messageId, remoteJid: jid, fromMe: false };
+        const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
         await channel.sendReaction(jid, messageKey, emoji);
       } else {
         if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');

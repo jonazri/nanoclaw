@@ -6,6 +6,7 @@ import {
   deleteTask,
   getAllChats,
   getLatestMessage,
+  getMessageFromMe,
   getMessagesByReaction,
   getMessagesSince,
   getNewMessages,
@@ -364,6 +365,35 @@ describe('getLatestMessage', () => {
 
   it('returns undefined for empty chat', () => {
     expect(getLatestMessage('nonexistent@g.us')).toBeUndefined();
+  });
+});
+
+// --- getMessageFromMe ---
+
+describe('getMessageFromMe', () => {
+  it('returns true for own messages', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    store({
+      id: 'mine', chat_jid: 'group@g.us', sender: 'me@s.whatsapp.net',
+      sender_name: 'Me', content: 'my msg', timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: true,
+    });
+
+    expect(getMessageFromMe('mine', 'group@g.us')).toBe(true);
+  });
+
+  it('returns false for other messages', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    store({
+      id: 'theirs', chat_jid: 'group@g.us', sender: 'a@s.whatsapp.net',
+      sender_name: 'A', content: 'their msg', timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    expect(getMessageFromMe('theirs', 'group@g.us')).toBe(false);
+  });
+
+  it('returns false for nonexistent message', () => {
+    expect(getMessageFromMe('nonexistent', 'group@g.us')).toBe(false);
   });
 });
 

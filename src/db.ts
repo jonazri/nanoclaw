@@ -632,6 +632,13 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 // --- Reaction accessors ---
 
+export function getMessageFromMe(messageId: string, chatJid: string): boolean {
+  const row = db
+    .prepare(`SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`)
+    .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
+  return row?.is_from_me === 1;
+}
+
 export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean } | undefined {
   const row = db
     .prepare(`SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)

@@ -1,6 +1,6 @@
 ---
 name: add-reactions
-description: Add WhatsApp emoji reaction support — receive, send, store, search, and voice-command reactions.
+description: Add WhatsApp emoji reaction support — receive, send, store, and search reactions.
 ---
 
 # Add Reactions
@@ -9,7 +9,6 @@ This skill adds complete emoji reaction support to NanoClaw's WhatsApp channel:
 - Receive and track reactions from WhatsApp
 - Send reactions programmatically
 - Store reactions in SQLite with full history
-- Voice commands ("react thumbs up to that")
 - Optional RAG integration for searching by reactions
 
 ## Phase 1: Pre-flight
@@ -35,7 +34,6 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-reactions
 ```
 
 This deterministically:
-- Adds `src/reaction-commands.ts` (voice command parser with 20+ emoji mappings)
 - Adds `scripts/migrate-reactions.ts` (database migration for reactions table)
 - Records the application in `.nanoclaw/state.yaml`
 
@@ -80,17 +78,28 @@ CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
 CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
 ```
 
-Add a query function for `reactToLatestMessage` to use (avoids opening a second connection):
+Add query functions for reactions (avoids opening a second connection):
 
 ```typescript
 /**
- * Get the most recent message ID for a chat
+ * Look up whether a specific message was sent by us
  */
-export function getLatestMessageId(chatJid: string): string | undefined {
+export function getMessageFromMe(messageId: string, chatJid: string): boolean {
   const row = db
-    .prepare(`SELECT id FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
-    .get(chatJid) as { id: string } | undefined;
-  return row?.id;
+    .prepare(`SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`)
+    .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
+  return row?.is_from_me === 1;
+}
+
+/**
+ * Get the most recent message for a chat (with fromMe flag)
+ */
+export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean } | undefined {
+  const row = db
+    .prepare(`SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
+    .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
+  if (!row) return undefined;
+  return { id: row.id, fromMe: row.is_from_me === 1 };
 }
 ```
 
@@ -209,10 +218,10 @@ export function getReactionStats(chatJid?: string): Array<{
 
 ### Modify src/channels/whatsapp.ts
 
-Add static imports for `storeReaction` and `getLatestMessageId` at the top of the file:
+Add static imports for `storeReaction` and `getLatestMessage` at the top of the file:
 
 ```typescript
-import { storeReaction, getLatestMessageId } from '../db.js';
+import { storeReaction, getLatestMessage } from '../db.js';
 ```
 
 Add the reaction event handler after the `messages.upsert` handler:
@@ -307,15 +316,15 @@ async sendReaction(
  * React to the most recent message in a chat
  */
 async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
-  const messageId = getLatestMessageId(chatJid);
-  if (!messageId) {
+  const latest = getLatestMessage(chatJid);
+  if (!latest) {
     throw new Error(`No messages found for chat ${chatJid}`);
   }
 
   const messageKey = {
-    id: messageId,
+    id: latest.id,
     remoteJid: chatJid,
-    fromMe: false,
+    fromMe: latest.fromMe,
   };
 
   await this.sendReaction(chatJid, messageKey, emoji);
@@ -385,19 +394,9 @@ sqlite3 store/messages.db "SELECT * FROM reactions ORDER BY timestamp DESC LIMIT
 
 ### Test sending reactions
 
-Say or type: "react thumbs up to that last message"
+Ask Andy to react to a message via the `react_to_message` MCP tool, or use the container skill directly.
 
 Check your phone — the reaction should appear on the message.
-
-### Test voice command parsing
-
-```typescript
-import { parseReactionCommand, isReactionCommand } from './reaction-commands.js';
-
-console.log(parseReactionCommand('react thumbs up'));  // => '👍'
-console.log(parseReactionCommand('mark that with a bookmark'));  // => '📌'
-console.log(isReactionCommand('react fire'));  // => true
-```
 
 ## Phase 5: Optional RAG Integration
 
@@ -419,12 +418,6 @@ This enables queries like:
 - Check NanoClaw logs for `Failed to process reaction` errors
 - Verify the chat is registered
 - Confirm the `messages.reaction` event handler was added correctly
-
-### Voice commands not working
-
-- Verify `src/reaction-commands.ts` exists and builds
-- Check that `handleReactionCommand()` is imported and called in the message handler
-- Test with simple commands first: "react thumbs up"
 
 ### Migration fails
 
