@@ -210,10 +210,10 @@ export function getReactionStats(chatJid?: string): Array<{
 
 ### Modify src/channels/whatsapp.ts
 
-Add a static import for `storeReaction` at the top of the file:
+Add static imports for `storeReaction` and `getLatestMessageId` at the top of the file:
 
 ```typescript
-import { storeReaction } from '../db.js';
+import { storeReaction, getLatestMessageId } from '../db.js';
 ```
 
 Add the reaction event handler after the `messages.upsert` handler:
@@ -308,8 +308,6 @@ async sendReaction(
  * React to the most recent message in a chat
  */
 async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
-  const { getLatestMessageId } = await import('../db.js');
-
   const messageId = getLatestMessageId(chatJid);
   if (!messageId) {
     throw new Error(`No messages found for chat ${chatJid}`);
