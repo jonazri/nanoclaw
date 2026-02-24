@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -137,6 +138,7 @@ function buildVolumeMounts(
 
   // Sync plugins from host ~/.claude/plugins/ into each group's .claude/plugins/
   // Rewrites installPath values so they resolve inside the container
+  const homeDir = os.homedir();
   const hostPluginsConfig = path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json');
   if (fs.existsSync(hostPluginsConfig)) {
     try {
