@@ -28,10 +28,12 @@ let daemon: ChildProcess | null = null;
 let daemonRL: readline.Interface | null = null;
 const pendingCommands = new Map<string, PendingCommand>();
 let daemonReady = false;
+let daemonStarting: Promise<void> | null = null;
 let consecutiveFailures = 0;
 
 async function ensureDaemon(): Promise<void> {
   if (daemon && !daemon.killed && daemonReady) return;
+  if (daemonStarting) return daemonStarting;
 
   // Clean up any dead process
   if (daemon) {
@@ -41,7 +43,7 @@ async function ensureDaemon(): Promise<void> {
     daemonReady = false;
   }
 
-  return new Promise<void>((resolve, reject) => {
+  daemonStarting = new Promise<void>((resolve, reject) => {
     const proc = spawn(VENV_PYTHON, [PYTHON_DAEMON], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: 'python' },
@@ -120,7 +122,11 @@ async function ensureDaemon(): Promise<void> {
         reject(new Error('Google Assistant daemon timed out during startup'));
       }
     }, 30_000);
+  }).finally(() => {
+    daemonStarting = null;
   });
+
+  return daemonStarting;
 }
 
 async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
