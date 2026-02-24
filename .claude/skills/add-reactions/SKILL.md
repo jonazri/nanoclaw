@@ -81,6 +81,20 @@ CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
 CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
 ```
 
+Add a query function for `reactToLatestMessage` to use (avoids opening a second connection):
+
+```typescript
+/**
+ * Get the most recent message ID for a chat
+ */
+export function getLatestMessageId(chatJid: string): string | undefined {
+  const row = db
+    .prepare(`SELECT id FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
+    .get(chatJid) as { id: string } | undefined;
+  return row?.id;
+}
+```
+
 Add these functions before any JSON migration sections:
 
 ```typescript
@@ -196,6 +210,12 @@ export function getReactionStats(chatJid?: string): Array<{
 
 ### Modify src/channels/whatsapp.ts
 
+Add a static import for `storeReaction` at the top of the file:
+
+```typescript
+import { storeReaction } from '../db.js';
+```
+
 Add the reaction event handler after the `messages.upsert` handler:
 
 ```typescript
@@ -214,11 +234,13 @@ this.sock.ev.on('messages.reaction', async (reactions) => {
       const groups = this.opts.registeredGroups();
       if (!groups[chatJid]) continue;
 
-      const reactorJid = key.participant || key.remoteJid || '';
+      // reaction.key identifies the reactor; key identifies the reacted-to message
+      const reactorJid = reaction.key?.participant || reaction.key?.remoteJid || '';
       const emoji = reaction.text || '';
-      const timestamp = new Date().toISOString();
+      const timestamp = reaction.senderTimestampMs
+        ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+        : new Date().toISOString();
 
-      const { storeReaction } = await import('../db.js');
       storeReaction({
         message_id: messageId,
         message_chat_jid: chatJid,
@@ -286,31 +308,17 @@ async sendReaction(
  * React to the most recent message in a chat
  */
 async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
-  const { default: Database } = await import('better-sqlite3');
-  const path = await import('path');
-  const { STORE_DIR } = await import('../config.js');
+  const { getLatestMessageId } = await import('../db.js');
 
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  const msgDb = new Database(dbPath, { readonly: true });
-
-  const latestMsg = msgDb
-    .prepare(
-      `SELECT id FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(chatJid) as { id: string } | undefined;
-
-  msgDb.close();
-
-  if (!latestMsg) {
+  const messageId = getLatestMessageId(chatJid);
+  if (!messageId) {
     throw new Error(`No messages found for chat ${chatJid}`);
   }
 
-  const isGroup = chatJid.endsWith('@g.us');
   const messageKey = {
-    id: latestMsg.id,
+    id: messageId,
     remoteJid: chatJid,
     fromMe: false,
-    ...(isGroup && { participant: undefined }),
   };
 
   await this.sendReaction(chatJid, messageKey, emoji);

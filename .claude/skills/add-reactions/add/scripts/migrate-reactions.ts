@@ -14,29 +14,33 @@ console.log(`Migrating database at: ${dbPath}`);
 const db = new Database(dbPath);
 
 try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS reactions (
-      message_id TEXT NOT NULL,
-      message_chat_jid TEXT NOT NULL,
-      reactor_jid TEXT NOT NULL,
-      reactor_name TEXT,
-      emoji TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      PRIMARY KEY (message_id, message_chat_jid, reactor_jid),
-      FOREIGN KEY (message_id, message_chat_jid) REFERENCES messages(id, chat_jid)
-    );
-  `);
+  db.pragma('foreign_keys = ON');
 
-  console.log('Created reactions table');
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS reactions (
+        message_id TEXT NOT NULL,
+        message_chat_jid TEXT NOT NULL,
+        reactor_jid TEXT NOT NULL,
+        reactor_name TEXT,
+        emoji TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        PRIMARY KEY (message_id, message_chat_jid, reactor_jid),
+        FOREIGN KEY (message_id, message_chat_jid) REFERENCES messages(id, chat_jid)
+      );
+    `);
 
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, message_chat_jid);
-    CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
-    CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
-    CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
-  `);
+    console.log('Created reactions table');
 
-  console.log('Created indexes');
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, message_chat_jid);
+      CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
+      CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
+      CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
+    `);
+
+    console.log('Created indexes');
+  })();
 
   const tableInfo = db.prepare(`PRAGMA table_info(reactions)`).all();
   console.log('\nReactions table schema:');

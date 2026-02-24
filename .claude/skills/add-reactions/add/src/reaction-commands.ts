@@ -13,7 +13,9 @@ interface ReactionCommand {
   description: string;
 }
 
-// Common reaction commands
+// Reaction commands — patterns are matched ONLY after isReactionCommand() confirms
+// the message is a reaction request, so these don't need to be overly cautious,
+// but we still avoid single common words that appear in normal speech.
 const REACTION_COMMANDS: ReactionCommand[] = [
   // Thumbs up/down
   { pattern: /thumbs?\s*up|👍/i, emoji: '👍', description: 'Thumbs up' },
@@ -21,34 +23,27 @@ const REACTION_COMMANDS: ReactionCommand[] = [
 
   // Love/heart
   { pattern: /\b(love|heart|❤️|❤)\b/i, emoji: '❤️', description: 'Heart/love' },
-  { pattern: /red\s*heart/i, emoji: '❤️', description: 'Red heart' },
 
   // Task/productivity
-  { pattern: /\b(check|done|complete|finish|✅)\b/i, emoji: '✅', description: 'Check mark' },
-  { pattern: /\b(pin|bookmark|save|🔖|📌)\b/i, emoji: '📌', description: 'Pin/bookmark' },
-  { pattern: /\b(todo|task|action)\b/i, emoji: '📋', description: 'Todo/task' },
-  { pattern: /\b(calendar|schedule|📅)\b/i, emoji: '📅', description: 'Calendar/schedule' },
-  { pattern: /\b(important|priority|urgent|🔥|⭐)\b/i, emoji: '⭐', description: 'Important/star' },
+  { pattern: /\b(check\s*mark|✅)\b/i, emoji: '✅', description: 'Check mark' },
+  { pattern: /\b(pin|bookmark|📌|🔖)\b/i, emoji: '📌', description: 'Pin/bookmark' },
+  { pattern: /\b(calendar|📅)\b/i, emoji: '📅', description: 'Calendar/schedule' },
+  { pattern: /\b(star|important|⭐)\b/i, emoji: '⭐', description: 'Important/star' },
 
-  // Acknowledgment
-  { pattern: /\b(ok|okay|ack|acknowledge|seen)\b/i, emoji: '👍', description: 'Acknowledged' },
-  { pattern: /\b(yes|yep|yeah|correct|right)\b/i, emoji: '✅', description: 'Yes/correct' },
-  { pattern: /\b(no|nope|wrong|incorrect)\b/i, emoji: '❌', description: 'No/wrong' },
-
-  // Questions/help
-  { pattern: /\b(question|help|confused|❓)\b/i, emoji: '❓', description: 'Question' },
-  { pattern: /\b(think|thinking|consider|💭)\b/i, emoji: '💭', description: 'Thinking' },
+  // Questions
+  { pattern: /\b(question\s*mark|❓)\b/i, emoji: '❓', description: 'Question mark' },
+  { pattern: /\b(thinking\s*face|💭)\b/i, emoji: '💭', description: 'Thinking face' },
 
   // Emotions
-  { pattern: /\b(fire|hot|lit|🔥)\b/i, emoji: '🔥', description: 'Fire/hot' },
+  { pattern: /\b(fire|🔥)\b/i, emoji: '🔥', description: 'Fire' },
   { pattern: /\b(celebrate|party|congrats|🎉)\b/i, emoji: '🎉', description: 'Celebration' },
   { pattern: /\b(pray|prayer|tefilla|🙏)\b/i, emoji: '🙏', description: 'Prayer' },
-  { pattern: /\b(laugh|lol|funny|😂)\b/i, emoji: '😂', description: 'Laughing' },
+  { pattern: /\b(laugh|lol|😂)\b/i, emoji: '😂', description: 'Laughing' },
 
   // Jewish-specific
-  { pattern: /\b(shabbat|shalom)\b/i, emoji: '🕎', description: 'Menorah' },
-  { pattern: /\b(torah|sefer)\b/i, emoji: '📜', description: 'Scroll/Torah' },
-  { pattern: /\b(mitz(?:vah|va))\b/i, emoji: '✨', description: 'Mitzvah/sparkles' },
+  { pattern: /\b(menorah|shabbat\s*shalom|🕎)\b/i, emoji: '🕎', description: 'Menorah' },
+  { pattern: /\b(torah|sefer|📜)\b/i, emoji: '📜', description: 'Scroll/Torah' },
+  { pattern: /\b(mitz(?:vah|va)|✨)\b/i, emoji: '✨', description: 'Mitzvah/sparkles' },
 ];
 
 /**
@@ -65,8 +60,8 @@ export function parseReactionCommand(message: string): string | null {
     }
   }
 
-  // Check for direct emoji in message
-  const emojiMatch = message.match(/[\u{1F300}-\u{1F9FF}]/u);
+  // Check for direct emoji in message (covers emoticons, symbols, and supplemental blocks)
+  const emojiMatch = message.match(/[\u{2600}-\u{27BF}\u{2B50}\u{2705}\u{274C}\u{1F300}-\u{1FAFF}]/u);
   if (emojiMatch) {
     return emojiMatch[0];
   }
@@ -84,13 +79,12 @@ export function parseReactionCommand(message: string): string | null {
 export function isReactionCommand(message: string): boolean {
   const normalized = message.toLowerCase().trim();
 
-  // Common reaction trigger phrases
+  // Reaction trigger phrases — must clearly indicate a reaction intent
   const triggers = [
     /^react\s+/i,
     /^add\s+(?:a\s+)?reaction/i,
-    /^mark\s+(?:that|this|the\s+last)/i,
-    /^put\s+(?:a\s+)?/i,
-    /^send\s+(?:a\s+)?/i,
+    /^mark\s+(?:that|this|the\s+last)\s+(?:with|as)\s+/i,
+    /^send\s+(?:a\s+)?reaction/i,
   ];
 
   return triggers.some(pattern => pattern.test(normalized));
@@ -133,7 +127,7 @@ export async function handleReactionCommand(
  * Get a description of all available reaction commands
  */
 export function getReactionCommandsHelp(): string {
-  const examples = REACTION_COMMANDS.slice(0, 10)
+  const examples = REACTION_COMMANDS
     .map(cmd => `- "${cmd.description}" -> ${cmd.emoji}`)
     .join('\n');
 
@@ -144,7 +138,7 @@ You can say things like:
 - "Mark that with a bookmark"
 - "Add a heart to that message"
 
-Common reactions:
+Supported reactions:
 ${examples}
 
 You can also use the emoji directly in your command!`;
