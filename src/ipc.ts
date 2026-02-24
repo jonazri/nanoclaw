@@ -263,10 +263,21 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+
+        // Scheduled task results always go to the main (private) chat,
+        // never to a group. group_folder already identifies the context.
+        const mainJid = Object.entries(registeredGroups).find(
+          ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+        )?.[0];
+        if (!mainJid) {
+          logger.warn('Cannot schedule task: main group not registered');
+          break;
+        }
+
         createTask({
           id: taskId,
           group_folder: targetFolder,
-          chat_jid: targetJid,
+          chat_jid: mainJid,
           prompt: data.prompt,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
