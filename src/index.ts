@@ -564,10 +564,12 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (messageId) {
+        if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
         const messageKey = { id: messageId, remoteJid: jid, fromMe: false };
-        await channel.sendReaction!(jid, messageKey, emoji);
+        await channel.sendReaction(jid, messageKey, emoji);
       } else {
-        await channel.reactToLatestMessage!(jid, emoji);
+        if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+        await channel.reactToLatestMessage(jid, emoji);
       }
     },
     registeredGroups: () => registeredGroups,

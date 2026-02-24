@@ -15,7 +15,7 @@ import makeWASocket, {
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import {
   getLastGroupSync,
-  getLatestMessageId,
+  getLatestMessage,
   setLastGroupSync,
   storeReaction,
   updateChatName,
@@ -392,15 +392,15 @@ export class WhatsAppChannel implements Channel {
   }
 
   async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
-    const messageId = getLatestMessageId(chatJid);
-    if (!messageId) {
+    const latest = getLatestMessage(chatJid);
+    if (!latest) {
       throw new Error(`No messages found for chat ${chatJid}`);
     }
 
     const messageKey = {
-      id: messageId,
+      id: latest.id,
       remoteJid: chatJid,
-      fromMe: false,
+      fromMe: latest.fromMe,
     };
 
     await this.sendReaction(chatJid, messageKey, emoji);

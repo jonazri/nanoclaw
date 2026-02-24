@@ -632,11 +632,12 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 // --- Reaction accessors ---
 
-export function getLatestMessageId(chatJid: string): string | undefined {
+export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean } | undefined {
   const row = db
-    .prepare(`SELECT id FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
-    .get(chatJid) as { id: string } | undefined;
-  return row?.id;
+    .prepare(`SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
+    .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
+  if (!row) return undefined;
+  return { id: row.id, fromMe: row.is_from_me === 1 };
 }
 
 export function storeReaction(reaction: Reaction): void {

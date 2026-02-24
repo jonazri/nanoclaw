@@ -23,7 +23,7 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
-  getLatestMessageId: vi.fn(() => undefined),
+  getLatestMessage: vi.fn(() => undefined),
   setLastGroupSync: vi.fn(),
   storeReaction: vi.fn(),
   updateChatName: vi.fn(),
