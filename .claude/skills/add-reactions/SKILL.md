@@ -15,7 +15,7 @@ This skill adds complete emoji reaction support to NanoClaw's WhatsApp channel:
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `reactions` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
+Read `.nanoclaw/state.yaml`. If `reactions` is in `applied_skills`, skip to Phase 4 (Verify). The code changes are already in place.
 
 ## Phase 2: Apply Code Changes
 
