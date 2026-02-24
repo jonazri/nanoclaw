@@ -25,8 +25,7 @@ try {
         reactor_name TEXT,
         emoji TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        PRIMARY KEY (message_id, message_chat_jid, reactor_jid),
-        FOREIGN KEY (message_id, message_chat_jid) REFERENCES messages(id, chat_jid)
+        PRIMARY KEY (message_id, message_chat_jid, reactor_jid)
       );
     `);
 

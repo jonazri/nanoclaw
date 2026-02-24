@@ -72,8 +72,7 @@ CREATE TABLE IF NOT EXISTS reactions (
   reactor_name TEXT,
   emoji TEXT NOT NULL,
   timestamp TEXT NOT NULL,
-  PRIMARY KEY (message_id, message_chat_jid, reactor_jid),
-  FOREIGN KEY (message_id, message_chat_jid) REFERENCES messages(id, chat_jid)
+  PRIMARY KEY (message_id, message_chat_jid, reactor_jid)
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, message_chat_jid);
 CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
