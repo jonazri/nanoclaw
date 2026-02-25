@@ -16,6 +16,7 @@ groups/*
 groups/main/*
 groups/global/*
 !groups/main/CLAUDE.md
+!groups/main/feature-requests/
 !groups/global/CLAUDE.md
 
 # Secrets
