@@ -18,12 +18,28 @@ import {
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
 import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+/** Compute the next run time for a recurring task. Returns null for one-shot tasks. */
+function computeNextRun(task: ScheduledTask): string | null {
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    return interval.next().toISOString();
+  } else if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    return new Date(Date.now() + ms).toISOString();
+  }
+  // 'once' tasks have no next run
+  return null;
+}
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -255,18 +271,9 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
-
+  // next_run was already advanced before enqueuing (see startSchedulerLoop).
+  // Recompute to pass through for the status logic ('once' tasks → completed).
+  const nextRun = computeNextRun(task);
   const resultSummary = error
     ? `Error: ${error}`
     : result
@@ -307,6 +314,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
+
+        // Advance next_run BEFORE enqueuing to prevent the next poll from
+        // re-discovering this task while it's still running. Without this,
+        // a long-running task gets enqueued again on the next 60s poll cycle
+        // and executes a second time once the first run finishes.
+        const nextRun = computeNextRun(currentTask);
+        updateTask(currentTask.id, { next_run: nextRun });
 
         deps.queue.enqueueTask(
           currentTask.chat_jid,
