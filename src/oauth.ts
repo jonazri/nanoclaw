@@ -66,8 +66,10 @@ const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function startTokenRefreshScheduler(
-  onFailure?: (msg: string) => void,
+  onAlert?: (msg: string) => void,
 ): void {
+  let hadFailure = false;
+
   const schedule = () => {
     if (refreshTimer) clearTimeout(refreshTimer);
 
@@ -102,9 +104,14 @@ export function startTokenRefreshScheduler(
     refreshTimer = setTimeout(async () => {
       const ok = await refreshOAuthToken();
       if (ok) {
+        if (hadFailure) {
+          hadFailure = false;
+          onAlert?.('OAuth token refreshed. Services restored.');
+        }
         schedule(); // Re-read credentials and schedule next
       } else {
-        onFailure?.('OAuth token refresh failed — retrying in 5 min.');
+        hadFailure = true;
+        onAlert?.('OAuth token refresh failed — retrying in 5 min.');
         refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
       }
     }, delayMs);
