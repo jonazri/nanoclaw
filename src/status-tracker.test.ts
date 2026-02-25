@@ -38,6 +38,10 @@ describe('StatusTracker', () => {
     tracker = new StatusTracker(deps);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   describe('forward-only transitions', () => {
     it('transitions RECEIVED -> THINKING -> WORKING -> DONE', async () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
@@ -250,15 +254,49 @@ describe('StatusTracker', () => {
       expect(emojis).toEqual(['👀', '💭']);
     });
 
-    it('skips messages still in RECEIVED state', async () => {
+    it('skips RECEIVED messages within grace period even if container is dead', async () => {
+      vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(false);
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      // Don't advance to THINKING
 
+      // Only 10s elapsed — within 30s grace period
+      vi.advanceTimersByTime(10_000);
       tracker.heartbeatCheck();
       await tracker.flush();
 
-      // Only the 👀 reaction, no ❌ (RECEIVED < THINKING, so heartbeat skips it)
+      // Only the 👀 reaction, no ❌
+      expect(deps.sendReaction).toHaveBeenCalledTimes(1);
+      expect(deps.sendReaction.mock.calls[0][2]).toBe('👀');
+    });
+
+    it('fails RECEIVED messages after grace period when container is dead', async () => {
+      vi.useFakeTimers();
+      deps.isContainerAlive.mockReturnValue(false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+
+      // 31s elapsed — past 30s grace period
+      vi.advanceTimersByTime(31_000);
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
+      const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
+      expect(failCalls).toHaveLength(1);
+      expect(deps.sendMessage).toHaveBeenCalledWith(
+        'main@s.whatsapp.net',
+        '[system] Task crashed — retrying.',
+      );
+    });
+
+    it('does NOT fail RECEIVED messages after grace period when container is alive', async () => {
+      vi.useFakeTimers();
+      deps.isContainerAlive.mockReturnValue(true);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+
+      // 31s elapsed but container is alive — don't fail
+      vi.advanceTimersByTime(31_000);
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
       expect(deps.sendReaction).toHaveBeenCalledTimes(1);
       expect(deps.sendReaction.mock.calls[0][2]).toBe('👀');
     });
@@ -282,7 +320,6 @@ describe('StatusTracker', () => {
         'main@s.whatsapp.net',
         '[system] Task timed out — retrying.',
       );
-      vi.useRealTimers();
     });
 
     it('does not timeout messages queued long in RECEIVED before reaching THINKING', async () => {
@@ -312,7 +349,6 @@ describe('StatusTracker', () => {
 
       const failCallsAfter = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
       expect(failCallsAfter).toHaveLength(1);
-      vi.useRealTimers();
     });
   });
 
@@ -329,7 +365,86 @@ describe('StatusTracker', () => {
       vi.advanceTimersByTime(6000);
 
       expect(tracker.isTracked('msg1')).toBe(false);
-      vi.useRealTimers();
+    });
+  });
+
+  describe('reaction retry', () => {
+    it('retries failed sends with exponential backoff (2s, 4s)', async () => {
+      vi.useFakeTimers();
+      let callCount = 0;
+      deps.sendReaction.mockImplementation(async () => {
+        callCount++;
+        if (callCount <= 2) throw new Error('network error');
+      });
+
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+
+      // First attempt fires immediately
+      await vi.advanceTimersByTimeAsync(0);
+      expect(callCount).toBe(1);
+
+      // After 2s: second attempt (first retry delay = 2s)
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(callCount).toBe(2);
+
+      // After 1s more (3s total): still waiting for 4s delay
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(callCount).toBe(2);
+
+      // After 3s more (6s total): third attempt fires (second retry delay = 4s)
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(callCount).toBe(3);
+
+      await tracker.flush();
+    });
+
+    it('gives up after max retries', async () => {
+      vi.useFakeTimers();
+      let callCount = 0;
+      deps.sendReaction.mockImplementation(async () => {
+        callCount++;
+        throw new Error('permanent failure');
+      });
+
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await tracker.flush();
+
+      expect(callCount).toBe(3); // MAX_RETRIES = 3
+    });
+  });
+
+  describe('batch transitions', () => {
+    it('markThinking can be called on multiple messages independently', async () => {
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg3', 'main@s.whatsapp.net', false);
+
+      // Mark all as thinking (simulates batch behavior)
+      tracker.markThinking('msg1');
+      tracker.markThinking('msg2');
+      tracker.markThinking('msg3');
+
+      await tracker.flush();
+
+      const thinkingCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '💭');
+      expect(thinkingCalls).toHaveLength(3);
+    });
+
+    it('markWorking can be called on multiple messages independently', async () => {
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
+      tracker.markThinking('msg1');
+      tracker.markThinking('msg2');
+
+      tracker.markWorking('msg1');
+      tracker.markWorking('msg2');
+
+      await tracker.flush();
+
+      const workingCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '🔄');
+      expect(workingCalls).toHaveLength(2);
     });
   });
 });
