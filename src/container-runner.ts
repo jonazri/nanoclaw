@@ -389,17 +389,24 @@ export async function runContainerAgent(
             // Streaming failsafe: detect auth errors immediately
             // In streaming mode the container never exits on auth errors —
             // the SDK retries internally. Catch it here and abort early.
-            if (parsed.result && AUTH_ERROR_PATTERN.test(parsed.result)) {
+            // Check parsed.error (actual SDK errors), NOT parsed.result
+            // (agent conversation text which may naturally discuss auth topics).
+            if (parsed.error && AUTH_ERROR_PATTERN.test(parsed.error)) {
               logger.warn(
                 { group: group.name, containerName },
                 'Auth error detected in streaming output, aborting container',
               );
-              container.kill('SIGTERM');
+              // Use `docker stop` to properly stop the container.
+              // container.kill('SIGTERM') only kills the docker CLI client,
+              // leaving the container running as a zombie.
+              exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+                if (err) container.kill('SIGKILL');
+              });
               clearTimeout(timeout);
               safeResolve({
                 status: 'error',
                 result: null,
-                error: parsed.result,
+                error: parsed.error,
                 newSessionId,
               });
               return;

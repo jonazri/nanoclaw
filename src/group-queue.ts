@@ -149,6 +149,8 @@ export class GroupQueue {
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
+    // Don't pipe to a dead container — let messages fall through to enqueueMessageCheck
+    if (!state.process || state.process.killed || state.process.exitCode != null) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');

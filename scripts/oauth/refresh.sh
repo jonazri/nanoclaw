@@ -6,7 +6,6 @@ PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 CREDENTIALS="$HOME/.claude/.credentials.json"
 DOTENV="$PROJECT_ROOT/.env"
 LOGFILE="$PROJECT_ROOT/logs/oauth-refresh.log"
-TIMER_NAME="nanoclaw-oauth-refresh-next"
 BUFFER_MS=$((5 * 60 * 1000))  # 5 minutes
 
 log() {
@@ -83,31 +82,3 @@ fi
 echo "CLAUDE_CODE_OAUTH_TOKEN=${access_token}" >> "$DOTENV.tmp"
 mv "$DOTENV.tmp" "$DOTENV"
 log "Updated .env with token (expires_at=$expires_at)"
-
-# --- Schedule next run ---
-systemctl --user stop "$TIMER_NAME.timer" 2>/dev/null || true
-systemctl --user reset-failed "$TIMER_NAME.service" 2>/dev/null || true
-
-now_ms=$(($(date +%s) * 1000))
-remaining_ms=$((expires_at - now_ms))
-schedule_buffer_ms=$((30 * 60 * 1000))
-
-if (( remaining_ms > schedule_buffer_ms )); then
-  next_run_ms=$((expires_at - schedule_buffer_ms))
-else
-  next_run_ms=$((now_ms + 5 * 60 * 1000))
-  log "WARN: token expires in <30 min, scheduling retry in 5 min"
-fi
-
-next_run_sec=$((next_run_ms / 1000))
-next_run_time=$(date -d "@$next_run_sec" -Iseconds)
-
-if systemd-run --user \
-  --unit="$TIMER_NAME" \
-  --on-calendar="$(date -d "@$next_run_sec" '+%Y-%m-%d %H:%M:%S')" \
-  --description="NanoClaw OAuth token refresh" \
-  "$(realpath "$0")"; then
-  log "Scheduled next refresh at $next_run_time"
-else
-  log "ERROR: systemd-run failed (exit $?), next refresh NOT scheduled"
-fi
