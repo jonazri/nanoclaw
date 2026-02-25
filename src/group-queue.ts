@@ -186,7 +186,10 @@ export class GroupQueue {
   /** Check if a group has an active container running. */
   isActive(groupJid: string): boolean {
     const state = this.groups.get(groupJid);
-    return state?.active ?? false;
+    if (!state?.active) return false;
+    // Match sendMessage's liveness check: process may have exited before finally-block cleanup
+    if (state.process && (state.process.killed || state.process.exitCode != null)) return false;
+    return true;
   }
 
   private async runForGroup(

@@ -16,6 +16,9 @@ const DONE_EMOJI = '\u{2705}';
 const FAILED_EMOJI = '\u{274C}';
 
 const CLEANUP_DELAY_MS = 5000;
+const RECEIVED_GRACE_MS = 30_000;
+const REACTION_MAX_RETRIES = 3;
+const REACTION_BASE_DELAY_MS = 2000;
 
 interface MessageKey {
   id: string;
@@ -57,6 +60,7 @@ export class StatusTracker {
   private tracked = new Map<string, TrackedMessage>();
   private deps: StatusTrackerDeps;
   private persistPath: string;
+  private _shuttingDown = false;
 
   constructor(deps: StatusTrackerDeps) {
     this.deps = deps;
@@ -132,6 +136,12 @@ export class StatusTracker {
     await Promise.allSettled(chains);
   }
 
+  /** Signal shutdown and flush. Prevents new retry sleeps so flush resolves quickly. */
+  async shutdown(): Promise<void> {
+    this._shuttingDown = true;
+    await this.flush();
+  }
+
   /**
    * Startup recovery: read persisted state and mark all non-terminal entries as failed.
    * Call this before the message loop starts.
@@ -191,7 +201,17 @@ export class StatusTracker {
     const now = Date.now();
     for (const [id, msg] of this.tracked) {
       if (msg.terminal !== null) continue;
-      if (msg.state < StatusState.THINKING) continue;
+
+      // For RECEIVED messages, only fail if container is dead AND grace period elapsed.
+      // This closes the gap where a container dies before advancing to THINKING.
+      if (msg.state < StatusState.THINKING) {
+        if (!this.deps.isContainerAlive(msg.chatJid) && now - msg.trackedAt > RECEIVED_GRACE_MS) {
+          logger.warn({ messageId: id, chatJid: msg.chatJid, age: now - msg.trackedAt }, 'Heartbeat: RECEIVED message stuck with dead container');
+          this.markAllFailed(msg.chatJid, 'Task crashed \u{2014} retrying.');
+          return; // Safe for main-chat-only scope. If expanded to multiple chats, loop instead of return.
+        }
+        continue;
+      }
 
       if (!this.deps.isContainerAlive(msg.chatJid)) {
         logger.warn({ messageId: id, chatJid: msg.chatJid }, 'Heartbeat: container dead, marking failed');
@@ -243,10 +263,22 @@ export class StatusTracker {
       fromMe: msg.fromMe,
     };
     msg.sendChain = msg.sendChain.then(async () => {
-      try {
-        await this.deps.sendReaction(msg.chatJid, key, emoji);
-      } catch (err) {
-        logger.error({ messageId: msg.messageId, emoji, err }, 'Failed to send status reaction');
+      for (let attempt = 1; attempt <= REACTION_MAX_RETRIES; attempt++) {
+        try {
+          await this.deps.sendReaction(msg.chatJid, key, emoji);
+          return;
+        } catch (err) {
+          if (attempt === REACTION_MAX_RETRIES) {
+            logger.error({ messageId: msg.messageId, emoji, err, attempts: attempt }, 'Failed to send status reaction after retries');
+          } else if (this._shuttingDown) {
+            logger.warn({ messageId: msg.messageId, emoji, attempt, err }, 'Reaction send failed, skipping retry (shutting down)');
+            return;
+          } else {
+            const delay = REACTION_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+            logger.warn({ messageId: msg.messageId, emoji, attempt, delay, err }, 'Reaction send failed, retrying');
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
       }
     });
   }
