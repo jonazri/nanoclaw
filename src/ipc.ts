@@ -33,6 +33,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   statusHeartbeat?: () => void;
+  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -46,6 +47,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+
+  const RECOVERY_INTERVAL_TICKS = 60; // ~60s when IPC_POLL_INTERVAL is 1s
+  let tickCount = 0;
 
   const processIpcFiles = async () => {
     if (isShabbatOrYomTov()) {
@@ -183,6 +187,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     // Status emoji heartbeat — detect dead containers with stale emoji state
     deps.statusHeartbeat?.();
+
+    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
+    tickCount++;
+    if (tickCount >= RECOVERY_INTERVAL_TICKS) {
+      tickCount = 0;
+      deps.recoverPendingMessages?.();
+    }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
@@ -455,7 +466,7 @@ export async function processTaskIpc(
 
     case 'refresh_oauth': {
       const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
-      exec(script, (err, stdout, stderr) => {
+      exec(script, { timeout: 60_000 }, (err, stdout, stderr) => {
         if (err) {
           logger.error({ err, stderr, sourceGroup }, 'OAuth refresh failed');
         } else {

@@ -48,7 +48,7 @@ export async function ensureTokenFresh(): Promise<boolean> {
 export function refreshOAuthToken(): Promise<boolean> {
   const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
   return new Promise((resolve) => {
-    execFile(script, (err) => {
+    execFile(script, { timeout: 60_000 }, (err) => {
       if (err) {
         logger.error({ err }, 'OAuth refresh script failed');
         resolve(false);
@@ -58,4 +58,57 @@ export function refreshOAuthToken(): Promise<boolean> {
       }
     });
   });
+}
+
+const SCHEDULE_BUFFER_MS = 30 * 60 * 1000; // 30 minutes before expiry
+const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function startTokenRefreshScheduler(
+  onFailure?: (msg: string) => void,
+): void {
+  const schedule = () => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+
+    let delayMs: number;
+    try {
+      const raw = fs.readFileSync(CREDENTIALS_PATH, 'utf-8');
+      const creds = JSON.parse(raw);
+      const expiresAt: number | undefined = creds?.claudeAiOauth?.expiresAt;
+
+      if (!expiresAt) {
+        logger.debug('No expiresAt in credentials, skipping refresh scheduling');
+        return;
+      }
+
+      const remainingMs = expiresAt - Date.now();
+      if (remainingMs > SCHEDULE_BUFFER_MS) {
+        delayMs = remainingMs - SCHEDULE_BUFFER_MS;
+      } else {
+        // Already close to expiry or expired — refresh soon
+        delayMs = REFRESH_BUFFER_MS;
+      }
+
+      logger.info(
+        { delayMs, expiresAt: new Date(expiresAt).toISOString() },
+        'Scheduled OAuth refresh',
+      );
+    } catch (err) {
+      logger.debug({ err }, 'Could not read credentials for scheduling');
+      return;
+    }
+
+    refreshTimer = setTimeout(async () => {
+      const ok = await refreshOAuthToken();
+      if (ok) {
+        schedule(); // Re-read credentials and schedule next
+      } else {
+        onFailure?.('OAuth token refresh failed — retrying in 5 min.');
+        refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
+      }
+    }, delayMs);
+  };
+
+  schedule();
 }

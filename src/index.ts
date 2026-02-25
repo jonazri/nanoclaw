@@ -43,7 +43,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
-import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
+import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler } from './oauth.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -566,6 +566,9 @@ async function main(): Promise<void> {
   // Ensure token is fresh at startup so the first container doesn't hit an expired token
   await ensureTokenFresh();
 
+  // Schedule proactive token refresh (replaces systemd-run scheduling)
+  startTokenRefreshScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -635,6 +638,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
+    recoverPendingMessages,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
