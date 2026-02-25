@@ -80,7 +80,8 @@ export function startTokenRefreshScheduler(
       const expiresAt: number | undefined = creds?.claudeAiOauth?.expiresAt;
 
       if (!expiresAt) {
-        logger.debug('No expiresAt in credentials, skipping refresh scheduling');
+        logger.debug('No expiresAt in credentials, scheduling retry');
+        refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
         return;
       }
 
@@ -89,7 +90,7 @@ export function startTokenRefreshScheduler(
         delayMs = remainingMs - SCHEDULE_BUFFER_MS;
       } else {
         // Already close to expiry or expired — refresh soon
-        delayMs = REFRESH_BUFFER_MS;
+        delayMs = RETRY_DELAY_MS;
       }
 
       logger.info(
@@ -98,6 +99,7 @@ export function startTokenRefreshScheduler(
       );
     } catch (err) {
       logger.debug({ err }, 'Could not read credentials for scheduling');
+      refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
       return;
     }
 
