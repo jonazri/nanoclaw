@@ -65,6 +65,13 @@ const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+export function stopTokenRefreshScheduler(): void {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 export function startTokenRefreshScheduler(
   onAlert?: (msg: string) => void,
 ): void {

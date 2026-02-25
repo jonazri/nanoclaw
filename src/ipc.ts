@@ -48,8 +48,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
-  const RECOVERY_INTERVAL_TICKS = 60; // ~60s when IPC_POLL_INTERVAL is 1s
-  let tickCount = 0;
+  const RECOVERY_INTERVAL_MS = 60_000;
+  let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
     if (isShabbatOrYomTov()) {
@@ -189,9 +189,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
     deps.statusHeartbeat?.();
 
     // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
-    tickCount++;
-    if (tickCount >= RECOVERY_INTERVAL_TICKS) {
-      tickCount = 0;
+    const now = Date.now();
+    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
+      lastRecoveryTime = now;
       deps.recoverPendingMessages?.();
     }
 
