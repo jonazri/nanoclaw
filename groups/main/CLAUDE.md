@@ -37,6 +37,10 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Temporary Scripts
+
+For throwaway queries, one-off database inspections, or quick debugging scripts, write them to `/workspace/project/scripts/scratch/`. This directory is gitignored. Don't put them in the group folder or in `scripts/` directly.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

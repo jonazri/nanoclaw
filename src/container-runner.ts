@@ -300,6 +300,21 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Prune old container logs — keep only the 20 most recent
+  try {
+    const logFiles = fs.readdirSync(logsDir)
+      .filter((f) => f.startsWith('container-') && f.endsWith('.log'))
+      .sort();
+    const MAX_CONTAINER_LOGS = 20;
+    if (logFiles.length > MAX_CONTAINER_LOGS) {
+      for (const old of logFiles.slice(0, logFiles.length - MAX_CONTAINER_LOGS)) {
+        fs.unlinkSync(path.join(logsDir, old));
+      }
+    }
+  } catch {
+    // Non-fatal — log rotation failure shouldn't block container runs
+  }
+
   return new Promise((resolve) => {
     let resolved = false;
     const safeResolve = (value: ContainerOutput) => {

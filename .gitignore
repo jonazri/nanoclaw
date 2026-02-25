@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+**/node_modules/
 .npm-cache/
 # Build output
 dist/
@@ -34,5 +34,10 @@ groups/global/*
 
 agents-sdk-docs
 
-# Python venv for voice recognition
+# Python
 scripts/venv/
+**/__pycache__/
+
+# Throwaway/scratch scripts (temp queries, one-off debugging)
+scripts/scratch/*
+!scripts/scratch/README.md

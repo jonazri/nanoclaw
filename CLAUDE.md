@@ -63,6 +63,10 @@ systemctl --user restart nanoclaw
 tail -f ~/code/yonibot/nanoclaw/logs/nanoclaw.log
 ```
 
+## Scratch Scripts
+
+`scripts/scratch/` is gitignored — use it for throwaway queries, one-off database inspections, and temporary debugging scripts. Don't put reusable tools there.
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
