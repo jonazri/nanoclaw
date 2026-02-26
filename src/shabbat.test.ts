@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { isShabbatOrYomTov, _loadScheduleForTest } from './shabbat.js';
+import {
+  isShabbatOrYomTov,
+  getNextCandleLighting,
+  _loadScheduleForTest,
+} from './shabbat.js';
 
 const TEST_SCHEDULE = {
   location: 'Test',
@@ -82,5 +86,35 @@ describe('isShabbatOrYomTov', () => {
   it('returns false after all windows', () => {
     vi.setSystemTime(new Date('2027-01-01T00:00:00.000Z'));
     expect(isShabbatOrYomTov()).toBe(false);
+  });
+});
+
+describe('getNextCandleLighting', () => {
+  beforeEach(() => {
+    _loadScheduleForTest(TEST_SCHEDULE);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns candle lighting 18 minutes before next shkiya', () => {
+    vi.setSystemTime(new Date('2026-02-20T12:00:00.000Z'));
+    const result = getNextCandleLighting();
+    expect(result).not.toBeNull();
+    // shkiya is 17:20, candle lighting is 17:02
+    expect(result!.time.toISOString()).toBe('2026-02-20T17:02:00.000Z');
+    expect(result!.label).toBe('Shabbat');
+  });
+
+  it('returns next window when current candle lighting has passed', () => {
+    vi.setSystemTime(new Date('2026-02-20T17:10:00.000Z'));
+    const result = getNextCandleLighting();
+    // First window candle lighting (17:02) already passed, returns second window
+    expect(result!.time.toISOString()).toBe('2026-02-27T17:10:00.000Z');
+  });
+
+  it('returns null after all windows', () => {
+    vi.setSystemTime(new Date('2027-01-01T00:00:00.000Z'));
+    expect(getNextCandleLighting()).toBeNull();
   });
 });
