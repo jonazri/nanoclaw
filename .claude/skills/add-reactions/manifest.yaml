@@ -1,10 +1,12 @@
 skill: reactions
 version: 1.0.0
-description: "WhatsApp emoji reaction support"
+description: "WhatsApp emoji reaction support with status tracking"
 core_version: 0.1.0
 adds:
   - scripts/migrate-reactions.ts
   - container/skills/reactions/SKILL.md
+  - src/status-tracker.ts
+  - src/status-tracker.test.ts
 modifies:
   - src/db.ts
   - src/channels/whatsapp.ts

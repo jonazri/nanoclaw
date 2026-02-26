@@ -1,13 +1,15 @@
 skill: refresh-oauth
 version: 1.0.0
-description: "Container agent can request OAuth token refresh via IPC"
+description: "Proactive OAuth token refresh with IPC, scheduler, and auth error recovery"
 core_version: 0.1.0
 adds:
   - container/skills/refresh-oauth/SKILL.md
   - scripts/oauth/refresh.sh
   - scripts/oauth/README.md
+  - src/oauth.ts
 modifies:
   - src/ipc.ts
+  - src/index.ts
 conflicts: []
 incompatible_with: []
 depends: []
