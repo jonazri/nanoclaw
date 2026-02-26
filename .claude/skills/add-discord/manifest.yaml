@@ -16,5 +16,8 @@ structured:
     - DISCORD_BOT_TOKEN
     - DISCORD_ONLY
 conflicts: []
+incompatible_with:
+  - telegram
+  - gmail
 depends: []
 test: "npx vitest run src/channels/discord.test.ts"

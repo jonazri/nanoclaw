@@ -29,8 +29,8 @@ describe('ci-matrix', () => {
   describe('computeOverlapMatrix', () => {
     it('detects overlap from shared modifies entries', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'telegram', modifies: ['src/config.ts', 'src/index.ts'], npmDependencies: [] },
-        { name: 'discord', modifies: ['src/config.ts', 'src/router.ts'], npmDependencies: [] },
+        { name: 'telegram', skill: 'telegram', modifies: ['src/config.ts', 'src/index.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'discord', skill: 'discord', modifies: ['src/config.ts', 'src/router.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -43,8 +43,8 @@ describe('ci-matrix', () => {
 
     it('returns no entry for non-overlapping skills', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'telegram', modifies: ['src/telegram.ts'], npmDependencies: ['grammy'] },
-        { name: 'discord', modifies: ['src/discord.ts'], npmDependencies: ['discord.js'] },
+        { name: 'telegram', skill: 'telegram', modifies: ['src/telegram.ts'], npmDependencies: ['grammy'], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'discord', skill: 'discord', modifies: ['src/discord.ts'], npmDependencies: ['discord.js'], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -54,8 +54,8 @@ describe('ci-matrix', () => {
 
     it('detects overlap from shared npm dependencies', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'skill-a', modifies: ['src/a.ts'], npmDependencies: ['lodash', 'zod'] },
-        { name: 'skill-b', modifies: ['src/b.ts'], npmDependencies: ['zod', 'express'] },
+        { name: 'skill-a', skill: 'skill-a', modifies: ['src/a.ts'], npmDependencies: ['lodash', 'zod'], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'skill-b', skill: 'skill-b', modifies: ['src/b.ts'], npmDependencies: ['zod', 'express'], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -68,8 +68,8 @@ describe('ci-matrix', () => {
 
     it('reports both modifies and npm overlap in one entry', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'skill-a', modifies: ['src/config.ts'], npmDependencies: ['zod'] },
-        { name: 'skill-b', modifies: ['src/config.ts'], npmDependencies: ['zod'] },
+        { name: 'skill-a', skill: 'skill-a', modifies: ['src/config.ts'], npmDependencies: ['zod'], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'skill-b', skill: 'skill-b', modifies: ['src/config.ts'], npmDependencies: ['zod'], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -81,9 +81,9 @@ describe('ci-matrix', () => {
 
     it('handles three skills with pairwise overlaps', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'a', modifies: ['src/config.ts'], npmDependencies: [] },
-        { name: 'b', modifies: ['src/config.ts', 'src/router.ts'], npmDependencies: [] },
-        { name: 'c', modifies: ['src/router.ts'], npmDependencies: [] },
+        { name: 'a', skill: 'a', modifies: ['src/config.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'b', skill: 'b', modifies: ['src/config.ts', 'src/router.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'c', skill: 'c', modifies: ['src/router.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -96,7 +96,7 @@ describe('ci-matrix', () => {
 
     it('returns empty array for single skill', () => {
       const skills: SkillOverlapInfo[] = [
-        { name: 'only', modifies: ['src/config.ts'], npmDependencies: ['zod'] },
+        { name: 'only', skill: 'only', modifies: ['src/config.ts'], npmDependencies: ['zod'], conflicts: [], depends: [], incompatible_with: [] },
       ];
 
       const matrix = computeOverlapMatrix(skills);
@@ -107,6 +107,86 @@ describe('ci-matrix', () => {
     it('returns empty array for no skills', () => {
       const matrix = computeOverlapMatrix([]);
       expect(matrix).toHaveLength(0);
+    });
+
+    it('excludes conflicting skill pairs', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'add-voice-transcription', skill: 'voice-transcription', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: ['voice-transcription-elevenlabs'], depends: [], incompatible_with: [] },
+        { name: 'add-voice-transcription-elevenlabs', skill: 'voice-transcription-elevenlabs', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: ['voice-transcription'], depends: [], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(0);
+    });
+
+    it('excludes pair when only one side declares conflict', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'a', skill: 'a', modifies: ['src/config.ts'], npmDependencies: [], conflicts: ['b'], depends: [], incompatible_with: [] },
+        { name: 'b', skill: 'b', modifies: ['src/config.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(0);
+    });
+
+    it('orders skills respecting dependencies', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'add-voice-recognition', skill: 'voice-recognition', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: [], depends: ['voice-transcription-elevenlabs'], incompatible_with: [] },
+        { name: 'add-voice-transcription-elevenlabs', skill: 'voice-transcription-elevenlabs', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(1);
+      // dependency (elevenlabs) should come first
+      expect(matrix[0].skills).toEqual(['add-voice-transcription-elevenlabs', 'add-voice-recognition']);
+    });
+
+    it('orders dependency first when b depends on a', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'base', skill: 'base', modifies: ['src/index.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'dependent', skill: 'dependent', modifies: ['src/index.ts'], npmDependencies: [], conflicts: [], depends: ['base'], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(1);
+      expect(matrix[0].skills).toEqual(['base', 'dependent']);
+    });
+
+    it('excludes pairs where either skill declares the other incompatible', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'add-discord', skill: 'discord', modifies: ['src/index.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: ['telegram'] },
+        { name: 'add-telegram', skill: 'telegram', modifies: ['src/index.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: ['discord'] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(0);
+    });
+
+    it('excludes pair when only one side declares incompatible_with', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'add-voice-recognition', skill: 'voice-recognition', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: ['voice-transcription'] },
+        { name: 'add-voice-transcription', skill: 'voice-transcription', modifies: ['src/channels/whatsapp.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(0);
+    });
+
+    it('does not exclude pairs with empty incompatible_with', () => {
+      const skills: SkillOverlapInfo[] = [
+        { name: 'a', skill: 'a', modifies: ['src/config.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+        { name: 'b', skill: 'b', modifies: ['src/config.ts'], npmDependencies: [], conflicts: [], depends: [], incompatible_with: [] },
+      ];
+
+      const matrix = computeOverlapMatrix(skills);
+
+      expect(matrix).toHaveLength(1);
     });
   });
 
@@ -138,6 +218,21 @@ describe('ci-matrix', () => {
       expect(info.npmDependencies).toEqual([]);
     });
 
+    it('extracts conflicts and depends from manifest', () => {
+      const manifest = makeManifest({
+        skill: 'voice-transcription-elevenlabs',
+        modifies: ['src/channels/whatsapp.ts'],
+        conflicts: ['voice-transcription'],
+        depends: [],
+      });
+
+      const info = extractOverlapInfo(manifest, 'add-voice-transcription-elevenlabs');
+
+      expect(info.skill).toBe('voice-transcription-elevenlabs');
+      expect(info.conflicts).toEqual(['voice-transcription']);
+      expect(info.depends).toEqual([]);
+    });
+
     it('handles structured without npm_dependencies', () => {
       const manifest = makeManifest({
         skill: 'env-only',
@@ -150,6 +245,29 @@ describe('ci-matrix', () => {
       const info = extractOverlapInfo(manifest, 'add-env-only');
 
       expect(info.npmDependencies).toEqual([]);
+    });
+
+    it('extracts incompatible_with from manifest', () => {
+      const manifest = makeManifest({
+        skill: 'discord',
+        modifies: ['src/index.ts'],
+        incompatible_with: ['telegram', 'gmail'],
+      });
+
+      const info = extractOverlapInfo(manifest, 'add-discord');
+
+      expect(info.incompatible_with).toEqual(['telegram', 'gmail']);
+    });
+
+    it('defaults incompatible_with to empty array', () => {
+      const manifest = makeManifest({
+        skill: 'simple',
+        modifies: ['src/index.ts'],
+      });
+
+      const info = extractOverlapInfo(manifest, 'add-simple');
+
+      expect(info.incompatible_with).toEqual([]);
     });
   });
 

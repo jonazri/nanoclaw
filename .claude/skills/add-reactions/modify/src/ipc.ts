@@ -13,11 +13,11 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendReaction?: (jid: string, emoji: string, messageId?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -43,12 +43,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
-    if (isShabbatOrYomTov()) {
-      logger.debug('Shabbat/Yom Tov active, skipping IPC processing');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
-      return;
-    }
-
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -95,6 +89,30 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (data.type === 'reaction' && data.chatJid && data.emoji && deps.sendReaction) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  try {
+                    await deps.sendReaction(data.chatJid, data.emoji, data.messageId);
+                    logger.info(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      'IPC reaction sent',
+                    );
+                  } catch (err) {
+                    logger.error(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup, err },
+                      'IPC reaction failed',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
                   );
                 }
               }

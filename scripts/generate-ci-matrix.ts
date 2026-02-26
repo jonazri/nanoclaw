@@ -12,8 +12,12 @@ export interface MatrixEntry {
 
 export interface SkillOverlapInfo {
   name: string;
+  skill: string;
   modifies: string[];
   npmDependencies: string[];
+  conflicts: string[];
+  depends: string[];
+  incompatible_with: string[];
 }
 
 /**
@@ -28,8 +32,12 @@ export function extractOverlapInfo(manifest: SkillManifest, dirName: string): Sk
 
   return {
     name: dirName,
+    skill: manifest.skill,
     modifies: manifest.modifies ?? [],
     npmDependencies: npmDeps,
+    conflicts: manifest.conflicts ?? [],
+    depends: manifest.depends ?? [],
+    incompatible_with: manifest.incompatible_with ?? [],
   };
 }
 
@@ -62,8 +70,26 @@ export function computeOverlapMatrix(skills: SkillOverlapInfo[]): MatrixEntry[] 
       }
 
       if (reasons.length > 0) {
+        // Skip conflicting skill pairs
+        if (a.conflicts.includes(b.skill) || b.conflicts.includes(a.skill)) {
+          continue;
+        }
+
+        // Skip incompatible skill pairs (can coexist but need manual merge)
+        if (a.incompatible_with.includes(b.skill) || b.incompatible_with.includes(a.skill)) {
+          continue;
+        }
+
+        // Order skills so dependencies come first
+        let ordered = [a.name, b.name];
+        if (a.depends.includes(b.skill)) {
+          ordered = [b.name, a.name];
+        } else if (b.depends.includes(a.skill)) {
+          ordered = [a.name, b.name];
+        }
+
         entries.push({
-          skills: [a.name, b.name],
+          skills: ordered,
           reason: reasons.join('; '),
         });
       }

@@ -18,6 +18,7 @@ export interface SkillManifest {
   license?: string;
   min_skills_system_version?: string;
   tested_with?: string[];
+  incompatible_with?: string[];
   post_apply?: string[];
 }
 
