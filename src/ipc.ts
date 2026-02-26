@@ -12,7 +12,11 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { sendGoogleAssistantCommand, resetGoogleAssistantConversation, googleAssistantHealth } from './google-assistant.js';
+import {
+  sendGoogleAssistantCommand,
+  resetGoogleAssistantConversation,
+  googleAssistantHealth,
+} from './google-assistant.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { isShabbatOrYomTov } from './shabbat.js';
@@ -20,7 +24,11 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendReaction: (jid: string, emoji: string, messageId?: string) => Promise<void>;
+  sendReaction: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   unregisterGroup: (jid: string) => boolean;
@@ -106,21 +114,34 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (data.type === 'reaction' && data.chatJid && data.emoji) {
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji
+              ) {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   try {
-                    await deps.sendReaction(data.chatJid, data.emoji, data.messageId);
+                    await deps.sendReaction(
+                      data.chatJid,
+                      data.emoji,
+                      data.messageId,
+                    );
                     logger.info(
                       { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
                       'IPC reaction sent',
                     );
                   } catch (err) {
                     logger.error(
-                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup, err },
+                      {
+                        chatJid: data.chatJid,
+                        emoji: data.emoji,
+                        sourceGroup,
+                        err,
+                      },
                       'IPC reaction failed',
                     );
                   }
@@ -455,9 +476,15 @@ export async function processTaskIpc(
       if (data.jid) {
         const deleted = deps.unregisterGroup(data.jid);
         if (deleted) {
-          logger.info({ jid: data.jid, sourceGroup }, 'Group unregistered via IPC');
+          logger.info(
+            { jid: data.jid, sourceGroup },
+            'Group unregistered via IPC',
+          );
         } else {
-          logger.warn({ jid: data.jid, sourceGroup }, 'unregister_group: JID not found');
+          logger.warn(
+            { jid: data.jid, sourceGroup },
+            'unregister_group: JID not found',
+          );
         }
       } else {
         logger.warn({ data }, 'Invalid unregister_group request - missing jid');
@@ -481,7 +508,12 @@ export async function processTaskIpc(
       const text = data.text as string | undefined;
 
       const writeIpcResponse = (reqId: string, response: object) => {
-        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+        const responsesDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'responses',
+        );
         fs.mkdirSync(responsesDir, { recursive: true });
         const responseFile = path.join(responsesDir, `${reqId}.json`);
         const tempFile = `${responseFile}.tmp`;
@@ -490,7 +522,10 @@ export async function processTaskIpc(
       };
 
       if (!requestId || !text) {
-        logger.warn({ data }, 'Invalid google_assistant_command: missing requestId or text');
+        logger.warn(
+          { data },
+          'Invalid google_assistant_command: missing requestId or text',
+        );
         if (requestId) {
           writeIpcResponse(requestId, {
             status: 'error',
@@ -511,17 +546,24 @@ export async function processTaskIpc(
         // Surface empty responses as explicit errors
         if (result.warning === 'no_response_text') {
           result.status = 'error';
-          result.error = 'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
+          result.error =
+            'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
         }
 
         writeIpcResponse(requestId, result);
-        logger.info({ requestId, sourceGroup, text: text.slice(0, 50) }, 'Google Assistant command processed');
+        logger.info(
+          { requestId, sourceGroup, text: text.slice(0, 50) },
+          'Google Assistant command processed',
+        );
       } catch (err) {
         writeIpcResponse(requestId, {
           status: 'error',
           error: err instanceof Error ? err.message : String(err),
         });
-        logger.error({ err, requestId, sourceGroup }, 'Google Assistant command failed');
+        logger.error(
+          { err, requestId, sourceGroup },
+          'Google Assistant command failed',
+        );
       }
       break;
     }

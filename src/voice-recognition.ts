@@ -21,9 +21,19 @@ export interface SpeakerIdentification {
 }
 
 const PROFILE_DIR = path.join(process.cwd(), 'data', 'voice-profiles');
-const VENV_PYTHON = path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
-const PYTHON_SERVICE = path.join(process.cwd(), 'scripts', 'voice-recognition-service.py');
-const SIMILARITY_THRESHOLD_HIGH = 0.70;
+const VENV_PYTHON = path.join(
+  process.cwd(),
+  'scripts',
+  'venv',
+  'bin',
+  'python3',
+);
+const PYTHON_SERVICE = path.join(
+  process.cwd(),
+  'scripts',
+  'voice-recognition-service.py',
+);
+const SIMILARITY_THRESHOLD_HIGH = 0.7;
 const SIMILARITY_THRESHOLD_MEDIUM = 0.55;
 
 // ── Pure math (no Python needed) ──────────────────────────────────
@@ -186,7 +196,9 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
  * Extract voice embedding from an audio buffer.
  * Writes buffer to a temp file, sends to Python daemon, returns embedding.
  */
-export async function extractVoiceEmbedding(audioBuffer: Buffer): Promise<number[]> {
+export async function extractVoiceEmbedding(
+  audioBuffer: Buffer,
+): Promise<number[]> {
   const tempFile = path.join(tmpdir(), `voice-${Date.now()}.ogg`);
 
   try {
@@ -199,7 +211,11 @@ export async function extractVoiceEmbedding(audioBuffer: Buffer): Promise<number
 
     return result.embedding;
   } finally {
-    try { await fs.unlink(tempFile); } catch { /* ignore */ }
+    try {
+      await fs.unlink(tempFile);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -262,7 +278,10 @@ export async function createVoiceProfile(
   };
 
   await saveVoiceProfile(profile);
-  logger.info({ name, sampleCount: embeddings.length }, 'Voice profile created');
+  logger.info(
+    { name, sampleCount: embeddings.length },
+    'Voice profile created',
+  );
 }
 
 /**
@@ -306,7 +325,10 @@ export async function identifySpeaker(
   }
 
   return {
-    speaker: bestMatch.similarity >= SIMILARITY_THRESHOLD_MEDIUM ? bestMatch.name : null,
+    speaker:
+      bestMatch.similarity >= SIMILARITY_THRESHOLD_MEDIUM
+        ? bestMatch.name
+        : null,
     similarity: bestMatch.similarity,
     confidence,
   };
@@ -335,7 +357,10 @@ export async function updateVoiceProfile(
   };
 
   await saveVoiceProfile(updatedProfile);
-  logger.info({ name, sampleCount: updatedProfile.sampleCount }, 'Voice profile updated');
+  logger.info(
+    { name, sampleCount: updatedProfile.sampleCount },
+    'Voice profile updated',
+  );
 }
 
 /**

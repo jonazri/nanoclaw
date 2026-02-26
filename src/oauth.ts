@@ -5,9 +5,14 @@ import path from 'path';
 
 import { logger } from './logger.js';
 
-export const AUTH_ERROR_PATTERN = /401|unauthorized|authentication|token.*expired|invalid.*token|expired.*token/i;
+export const AUTH_ERROR_PATTERN =
+  /401|unauthorized|authentication|token.*expired|invalid.*token|expired.*token/i;
 
-const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const CREDENTIALS_PATH = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 /**

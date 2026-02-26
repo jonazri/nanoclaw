@@ -49,7 +49,8 @@ export function initShabbatSchedule(): void {
     );
 
     const expiresAt = new Date(parsed.expiresAt).getTime();
-    const warningThreshold = Date.now() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
+    const warningThreshold =
+      Date.now() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
     if (expiresAt < warningThreshold) {
       logger.warn(
         { expiresAt: parsed.expiresAt },

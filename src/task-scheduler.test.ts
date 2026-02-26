@@ -57,7 +57,9 @@ describe('task scheduler', () => {
     expect(enqueueTask).toHaveBeenCalledOnce();
     // next_run should already be in the future when enqueueTask runs
     expect(nextRunAtEnqueue).not.toBeNull();
-    expect(new Date(nextRunAtEnqueue!).getTime()).toBeGreaterThan(now.getTime());
+    expect(new Date(nextRunAtEnqueue!).getTime()).toBeGreaterThan(
+      now.getTime(),
+    );
   });
 
   it('pauses due tasks with invalid group folders to prevent retry churn', async () => {

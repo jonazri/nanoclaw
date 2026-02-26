@@ -13,8 +13,18 @@ export interface GoogleAssistantResponse {
   raw_html?: string;
 }
 
-const VENV_PYTHON = path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
-const PYTHON_DAEMON = path.join(process.cwd(), 'scripts', 'google-assistant-daemon.py');
+const VENV_PYTHON = path.join(
+  process.cwd(),
+  'scripts',
+  'venv',
+  'bin',
+  'python3',
+);
+const PYTHON_DAEMON = path.join(
+  process.cwd(),
+  'scripts',
+  'google-assistant-daemon.py',
+);
 
 // ── Python daemon management ──────────────────────────────────────
 
@@ -108,7 +118,10 @@ async function ensureDaemon(): Promise<void> {
           pending.resolve(parsed);
         }
       } else if (pendingCommands.size > 0) {
-        logger.warn({ cmdId, pending: pendingCommands.size }, 'Unroutable response from daemon (no matching id)');
+        logger.warn(
+          { cmdId, pending: pendingCommands.size },
+          'Unroutable response from daemon (no matching id)',
+        );
       }
     });
 
@@ -132,7 +145,10 @@ async function ensureDaemon(): Promise<void> {
 async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
   // Auto-restart daemon after consecutive failures
   if (consecutiveFailures >= 3 && daemon && !daemon.killed) {
-    logger.warn({ consecutiveFailures }, 'Too many consecutive failures, restarting daemon');
+    logger.warn(
+      { consecutiveFailures },
+      'Too many consecutive failures, restarting daemon',
+    );
     daemon.kill();
     daemon = null;
     daemonRL = null;
@@ -167,7 +183,9 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
 /**
  * Send a text command to Google Assistant and return the response.
  */
-export async function sendGoogleAssistantCommand(text: string): Promise<GoogleAssistantResponse> {
+export async function sendGoogleAssistantCommand(
+  text: string,
+): Promise<GoogleAssistantResponse> {
   let result: any;
   try {
     result = await sendCommand({ cmd: 'command', text });

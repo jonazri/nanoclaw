@@ -9,7 +9,11 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import {
+  ContainerOutput,
+  runContainerAgent,
+  writeTasksSnapshot,
+} from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -22,7 +26,11 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
+import {
+  AUTH_ERROR_PATTERN,
+  ensureTokenFresh,
+  refreshOAuthToken,
+} from './oauth.js';
 import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -45,14 +53,22 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
+  onProcess: (
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder: string,
+  ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
-async function notifyMain(deps: SchedulerDependencies, text: string): Promise<void> {
+async function notifyMain(
+  deps: SchedulerDependencies,
+  text: string,
+): Promise<void> {
   const groups = deps.registeredGroups();
   const mainJid = Object.entries(groups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
   if (mainJid) {
     await deps.sendMessage(mainJid, text);
@@ -167,7 +183,8 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (proc, containerName) =>
+        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -197,8 +214,14 @@ async function runTask(
       const outputError = output.error || 'Unknown error';
 
       if (AUTH_ERROR_PATTERN.test(outputError)) {
-        logger.warn({ taskId: task.id }, 'Auth error in scheduled task, refreshing token and retrying');
-        await notifyMain(deps, '[system] Auth token expired — refreshing and retrying.');
+        logger.warn(
+          { taskId: task.id },
+          'Auth error in scheduled task, refreshing token and retrying',
+        );
+        await notifyMain(
+          deps,
+          '[system] Auth token expired — refreshing and retrying.',
+        );
         const refreshed = await refreshOAuthToken();
         if (refreshed) {
           const retry = await runContainerAgent(
@@ -211,7 +234,13 @@ async function runTask(
               isMain,
               isScheduledTask: true,
             },
-            (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+            (proc, containerName) =>
+              deps.onProcess(
+                task.chat_jid,
+                proc,
+                containerName,
+                task.group_folder,
+              ),
             async (streamedOutput: ContainerOutput) => {
               if (streamedOutput.result) {
                 result = streamedOutput.result;
@@ -232,15 +261,27 @@ async function runTask(
           );
           if (retry.status === 'error') {
             error = retry.error || 'Unknown error after retry';
-            logger.error({ taskId: task.id, error }, 'Scheduled task failed after token refresh');
-            await notifyMain(deps, '[system] Token refresh failed. You may need to run "claude login".');
+            logger.error(
+              { taskId: task.id, error },
+              'Scheduled task failed after token refresh',
+            );
+            await notifyMain(
+              deps,
+              '[system] Token refresh failed. You may need to run "claude login".',
+            );
           } else {
             if (retry.result) result = retry.result;
-            await notifyMain(deps, '[system] Token refreshed. Services restored.');
+            await notifyMain(
+              deps,
+              '[system] Token refreshed. Services restored.',
+            );
           }
         } else {
           error = outputError;
-          await notifyMain(deps, '[system] Token refresh failed. You may need to run "claude login".');
+          await notifyMain(
+            deps,
+            '[system] Token refresh failed. You may need to run "claude login".',
+          );
         }
       } else {
         error = outputError;
@@ -298,7 +339,10 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 
       if (isShabbatOrYomTov()) {
         if (dueTasks.length > 0) {
-          logger.debug({ count: dueTasks.length }, 'Shabbat/Yom Tov active, skipping due tasks');
+          logger.debug(
+            { count: dueTasks.length },
+            'Shabbat/Yom Tov active, skipping due tasks',
+          );
         }
         setTimeout(loop, SCHEDULER_POLL_INTERVAL);
         return;
@@ -322,10 +366,8 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         const nextRun = computeNextRun(currentTask);
         updateTask(currentTask.id, { next_run: nextRun });
 
-        deps.queue.enqueueTask(
-          currentTask.chat_jid,
-          currentTask.id,
-          () => runTask(currentTask, deps),
+        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
+          runTask(currentTask, deps),
         );
       }
     } catch (err) {

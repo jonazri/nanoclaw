@@ -60,7 +60,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('msg-1');
     expect(messages[0].sender).toBe('123@s.whatsapp.net');
@@ -80,7 +84,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:04.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     expect(messages).toHaveLength(0);
   });
 
@@ -98,7 +106,11 @@ describe('storeMessage', () => {
     });
 
     // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     expect(messages).toHaveLength(1);
   });
 
@@ -123,7 +135,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
   });
@@ -136,33 +152,57 @@ describe('getMessagesSince', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     store({
-      id: 'm1', chat_jid: 'group@g.us', sender: 'Alice@s.whatsapp.net',
-      sender_name: 'Alice', content: 'first', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'm1',
+      chat_jid: 'group@g.us',
+      sender: 'Alice@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'first',
+      timestamp: '2024-01-01T00:00:01.000Z',
     });
     store({
-      id: 'm2', chat_jid: 'group@g.us', sender: 'Bob@s.whatsapp.net',
-      sender_name: 'Bob', content: 'second', timestamp: '2024-01-01T00:00:02.000Z',
+      id: 'm2',
+      chat_jid: 'group@g.us',
+      sender: 'Bob@s.whatsapp.net',
+      sender_name: 'Bob',
+      content: 'second',
+      timestamp: '2024-01-01T00:00:02.000Z',
     });
     storeMessage({
-      id: 'm3', chat_jid: 'group@g.us', sender: 'Bot@s.whatsapp.net',
-      sender_name: 'Bot', content: 'bot reply', timestamp: '2024-01-01T00:00:03.000Z',
+      id: 'm3',
+      chat_jid: 'group@g.us',
+      sender: 'Bot@s.whatsapp.net',
+      sender_name: 'Bot',
+      content: 'bot reply',
+      timestamp: '2024-01-01T00:00:03.000Z',
       is_bot_message: true,
     });
     store({
-      id: 'm4', chat_jid: 'group@g.us', sender: 'Carol@s.whatsapp.net',
-      sender_name: 'Carol', content: 'third', timestamp: '2024-01-01T00:00:04.000Z',
+      id: 'm4',
+      chat_jid: 'group@g.us',
+      sender: 'Carol@s.whatsapp.net',
+      sender_name: 'Carol',
+      content: 'third',
+      timestamp: '2024-01-01T00:00:04.000Z',
     });
   });
 
   it('returns messages after the given timestamp', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:02.000Z', 'Andy');
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'Andy',
+    );
     // Should exclude m1, m2 (before/at timestamp), m3 (bot message)
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('third');
   });
 
   it('excludes bot messages via is_bot_message flag', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     const botMsgs = msgs.filter((m) => m.content === 'bot reply');
     expect(botMsgs).toHaveLength(0);
   });
@@ -176,11 +216,18 @@ describe('getMessagesSince', () => {
   it('filters pre-migration bot messages via content prefix backstop', () => {
     // Simulate a message written before migration: has prefix but is_bot_message = 0
     store({
-      id: 'm5', chat_jid: 'group@g.us', sender: 'Bot@s.whatsapp.net',
-      sender_name: 'Bot', content: 'Andy: old bot reply',
+      id: 'm5',
+      chat_jid: 'group@g.us',
+      sender: 'Bot@s.whatsapp.net',
+      sender_name: 'Bot',
+      content: 'Andy: old bot reply',
       timestamp: '2024-01-01T00:00:05.000Z',
     });
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:04.000Z', 'Andy');
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:04.000Z',
+      'Andy',
+    );
     expect(msgs).toHaveLength(0);
   });
 });
@@ -193,21 +240,37 @@ describe('getNewMessages', () => {
     storeChatMetadata('group2@g.us', '2024-01-01T00:00:00.000Z');
 
     store({
-      id: 'a1', chat_jid: 'group1@g.us', sender: 'user@s.whatsapp.net',
-      sender_name: 'User', content: 'g1 msg1', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'a1',
+      chat_jid: 'group1@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'g1 msg1',
+      timestamp: '2024-01-01T00:00:01.000Z',
     });
     store({
-      id: 'a2', chat_jid: 'group2@g.us', sender: 'user@s.whatsapp.net',
-      sender_name: 'User', content: 'g2 msg1', timestamp: '2024-01-01T00:00:02.000Z',
+      id: 'a2',
+      chat_jid: 'group2@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'g2 msg1',
+      timestamp: '2024-01-01T00:00:02.000Z',
     });
     storeMessage({
-      id: 'a3', chat_jid: 'group1@g.us', sender: 'user@s.whatsapp.net',
-      sender_name: 'User', content: 'bot reply', timestamp: '2024-01-01T00:00:03.000Z',
+      id: 'a3',
+      chat_jid: 'group1@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'bot reply',
+      timestamp: '2024-01-01T00:00:03.000Z',
       is_bot_message: true,
     });
     store({
-      id: 'a4', chat_jid: 'group1@g.us', sender: 'user@s.whatsapp.net',
-      sender_name: 'User', content: 'g1 msg2', timestamp: '2024-01-01T00:00:04.000Z',
+      id: 'a4',
+      chat_jid: 'group1@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'g1 msg2',
+      timestamp: '2024-01-01T00:00:04.000Z',
     });
   });
 
@@ -339,12 +402,20 @@ describe('getLatestMessage', () => {
   it('returns the most recent message for a chat', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
     store({
-      id: 'old', chat_jid: 'group@g.us', sender: 'a@s.whatsapp.net',
-      sender_name: 'A', content: 'old', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'old',
+      chat_jid: 'group@g.us',
+      sender: 'a@s.whatsapp.net',
+      sender_name: 'A',
+      content: 'old',
+      timestamp: '2024-01-01T00:00:01.000Z',
     });
     store({
-      id: 'new', chat_jid: 'group@g.us', sender: 'b@s.whatsapp.net',
-      sender_name: 'B', content: 'new', timestamp: '2024-01-01T00:00:02.000Z',
+      id: 'new',
+      chat_jid: 'group@g.us',
+      sender: 'b@s.whatsapp.net',
+      sender_name: 'B',
+      content: 'new',
+      timestamp: '2024-01-01T00:00:02.000Z',
     });
 
     const latest = getLatestMessage('group@g.us');
@@ -354,8 +425,12 @@ describe('getLatestMessage', () => {
   it('returns fromMe: true for own messages', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
     store({
-      id: 'mine', chat_jid: 'group@g.us', sender: 'me@s.whatsapp.net',
-      sender_name: 'Me', content: 'my msg', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'mine',
+      chat_jid: 'group@g.us',
+      sender: 'me@s.whatsapp.net',
+      sender_name: 'Me',
+      content: 'my msg',
+      timestamp: '2024-01-01T00:00:01.000Z',
       is_from_me: true,
     });
 
@@ -374,8 +449,12 @@ describe('getMessageFromMe', () => {
   it('returns true for own messages', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
     store({
-      id: 'mine', chat_jid: 'group@g.us', sender: 'me@s.whatsapp.net',
-      sender_name: 'Me', content: 'my msg', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'mine',
+      chat_jid: 'group@g.us',
+      sender: 'me@s.whatsapp.net',
+      sender_name: 'Me',
+      content: 'my msg',
+      timestamp: '2024-01-01T00:00:01.000Z',
       is_from_me: true,
     });
 
@@ -385,8 +464,12 @@ describe('getMessageFromMe', () => {
   it('returns false for other messages', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
     store({
-      id: 'theirs', chat_jid: 'group@g.us', sender: 'a@s.whatsapp.net',
-      sender_name: 'A', content: 'their msg', timestamp: '2024-01-01T00:00:01.000Z',
+      id: 'theirs',
+      chat_jid: 'group@g.us',
+      sender: 'a@s.whatsapp.net',
+      sender_name: 'A',
+      content: 'their msg',
+      timestamp: '2024-01-01T00:00:01.000Z',
     });
 
     expect(getMessageFromMe('theirs', 'group@g.us')).toBe(false);
@@ -402,9 +485,12 @@ describe('getMessageFromMe', () => {
 describe('storeReaction', () => {
   it('stores and retrieves a reaction', () => {
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', reactor_name: 'Alice',
-      emoji: '👍', timestamp: '2024-01-01T00:00:01.000Z',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      reactor_name: 'Alice',
+      emoji: '👍',
+      timestamp: '2024-01-01T00:00:01.000Z',
     });
 
     const reactions = getReactionsForMessage('msg-1', 'group@g.us');
@@ -415,12 +501,18 @@ describe('storeReaction', () => {
 
   it('upserts on same reactor + message', () => {
     const base = {
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', reactor_name: 'Alice',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      reactor_name: 'Alice',
       timestamp: '2024-01-01T00:00:01.000Z',
     };
     storeReaction({ ...base, emoji: '👍' });
-    storeReaction({ ...base, emoji: '❤️', timestamp: '2024-01-01T00:00:02.000Z' });
+    storeReaction({
+      ...base,
+      emoji: '❤️',
+      timestamp: '2024-01-01T00:00:02.000Z',
+    });
 
     const reactions = getReactionsForMessage('msg-1', 'group@g.us');
     expect(reactions).toHaveLength(1);
@@ -429,13 +521,17 @@ describe('storeReaction', () => {
 
   it('removes reaction when emoji is empty', () => {
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', emoji: '👍',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '👍',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', emoji: '',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
 
@@ -448,13 +544,17 @@ describe('storeReaction', () => {
 describe('getReactionsForMessage', () => {
   it('returns multiple reactions ordered by timestamp', () => {
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'b@s.whatsapp.net', emoji: '❤️',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'b@s.whatsapp.net',
+      emoji: '❤️',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'a@s.whatsapp.net', emoji: '👍',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'a@s.whatsapp.net',
+      emoji: '👍',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
@@ -475,13 +575,18 @@ describe('getMessagesByReaction', () => {
   beforeEach(() => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
     store({
-      id: 'msg-1', chat_jid: 'group@g.us', sender: 'author@s.whatsapp.net',
-      sender_name: 'Author', content: 'bookmarked msg',
+      id: 'msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'author@s.whatsapp.net',
+      sender_name: 'Author',
+      content: 'bookmarked msg',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', emoji: '📌',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '📌',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
   });
@@ -494,10 +599,18 @@ describe('getMessagesByReaction', () => {
   });
 
   it('filters by chatJid when provided', () => {
-    const results = getMessagesByReaction('user@s.whatsapp.net', '📌', 'group@g.us');
+    const results = getMessagesByReaction(
+      'user@s.whatsapp.net',
+      '📌',
+      'group@g.us',
+    );
     expect(results).toHaveLength(1);
 
-    const empty = getMessagesByReaction('user@s.whatsapp.net', '📌', 'other@g.us');
+    const empty = getMessagesByReaction(
+      'user@s.whatsapp.net',
+      '📌',
+      'other@g.us',
+    );
     expect(empty).toHaveLength(0);
   });
 
@@ -511,13 +624,17 @@ describe('getMessagesByReaction', () => {
 describe('getReactionsByUser', () => {
   it('returns reactions for a user ordered by timestamp desc', () => {
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', emoji: '👍',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '👍',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
     storeReaction({
-      message_id: 'msg-2', message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net', emoji: '❤️',
+      message_id: 'msg-2',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '❤️',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
 
@@ -530,8 +647,10 @@ describe('getReactionsByUser', () => {
   it('respects the limit parameter', () => {
     for (let i = 0; i < 5; i++) {
       storeReaction({
-        message_id: `msg-${i}`, message_chat_jid: 'group@g.us',
-        reactor_jid: 'user@s.whatsapp.net', emoji: '👍',
+        message_id: `msg-${i}`,
+        message_chat_jid: 'group@g.us',
+        reactor_jid: 'user@s.whatsapp.net',
+        emoji: '👍',
         timestamp: `2024-01-01T00:00:0${i}.000Z`,
       });
     }
@@ -549,23 +668,31 @@ describe('getReactionsByUser', () => {
 describe('getReactionStats', () => {
   beforeEach(() => {
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'a@s.whatsapp.net', emoji: '👍',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'a@s.whatsapp.net',
+      emoji: '👍',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
     storeReaction({
-      message_id: 'msg-2', message_chat_jid: 'group@g.us',
-      reactor_jid: 'b@s.whatsapp.net', emoji: '👍',
+      message_id: 'msg-2',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'b@s.whatsapp.net',
+      emoji: '👍',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'group@g.us',
-      reactor_jid: 'c@s.whatsapp.net', emoji: '❤️',
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'c@s.whatsapp.net',
+      emoji: '❤️',
       timestamp: '2024-01-01T00:00:03.000Z',
     });
     storeReaction({
-      message_id: 'msg-1', message_chat_jid: 'other@g.us',
-      reactor_jid: 'a@s.whatsapp.net', emoji: '🔥',
+      message_id: 'msg-1',
+      message_chat_jid: 'other@g.us',
+      reactor_jid: 'a@s.whatsapp.net',
+      emoji: '🔥',
       timestamp: '2024-01-01T00:00:04.000Z',
     });
   });
@@ -579,7 +706,7 @@ describe('getReactionStats', () => {
   it('filters by chatJid', () => {
     const stats = getReactionStats('group@g.us');
     expect(stats).toHaveLength(2);
-    expect(stats.find(s => s.emoji === '🔥')).toBeUndefined();
+    expect(stats.find((s) => s.emoji === '🔥')).toBeUndefined();
   });
 
   it('returns empty for chat with no reactions', () => {

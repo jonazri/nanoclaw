@@ -10,15 +10,34 @@ const TEST_SCHEDULE = {
   expiresAt: '2031-01-01T00:00:00.000Z',
   windowCount: 3,
   windows: [
-    { start: '2026-02-20T17:20:00.000Z', end: '2026-02-21T23:45:00.000Z', type: 'shabbat' as const, label: 'Shabbat' },
-    { start: '2026-02-27T17:28:00.000Z', end: '2026-02-28T23:50:00.000Z', type: 'shabbat' as const, label: 'Shabbat' },
-    { start: '2026-03-20T17:40:00.000Z', end: '2026-03-22T23:55:00.000Z', type: 'shabbat+yomtov' as const, label: 'Shabbat / Pesach' },
+    {
+      start: '2026-02-20T17:20:00.000Z',
+      end: '2026-02-21T23:45:00.000Z',
+      type: 'shabbat' as const,
+      label: 'Shabbat',
+    },
+    {
+      start: '2026-02-27T17:28:00.000Z',
+      end: '2026-02-28T23:50:00.000Z',
+      type: 'shabbat' as const,
+      label: 'Shabbat',
+    },
+    {
+      start: '2026-03-20T17:40:00.000Z',
+      end: '2026-03-22T23:55:00.000Z',
+      type: 'shabbat+yomtov' as const,
+      label: 'Shabbat / Pesach',
+    },
   ],
 };
 
 describe('isShabbatOrYomTov', () => {
-  beforeEach(() => { _loadScheduleForTest(TEST_SCHEDULE); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    _loadScheduleForTest(TEST_SCHEDULE);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('returns true during a Shabbat window', () => {
     vi.setSystemTime(new Date('2026-02-20T20:00:00.000Z'));

@@ -42,8 +42,8 @@ function analyzeSentiment(
   const eventTexts = audioEvents.map((e) => e.text.toLowerCase());
 
   // Check for emotional indicators
-  const hasLaughter = eventTexts.some((t) =>
-    t.includes('laugh') || t.includes('chuckle') || t.includes('giggle'),
+  const hasLaughter = eventTexts.some(
+    (t) => t.includes('laugh') || t.includes('chuckle') || t.includes('giggle'),
   );
   const hasSighing = eventTexts.some((t) => t.includes('sigh'));
   const hasGroaning = eventTexts.some((t) => t.includes('groan'));
@@ -76,9 +76,7 @@ function formatMetadata(metadata: TranscriptionMetadata): string {
 
   // Audio events
   if (metadata.audioEvents.length > 0) {
-    const eventSummary = metadata.audioEvents
-      .map((e) => e.text)
-      .join(', ');
+    const eventSummary = metadata.audioEvents.map((e) => e.text).join(', ');
     parts.push(eventSummary);
   }
 
