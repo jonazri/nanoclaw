@@ -15,7 +15,10 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
+import {
+  cleanupOrphans,
+  ensureContainerRuntimeRunning,
+} from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -150,7 +153,9 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 }
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+export function _setRegisteredGroups(
+  groups: Record<string, RegisteredGroup>,
+): void {
   registeredGroups = groups;
 }
 
@@ -176,7 +181,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const missedMessages = getMessagesSince(
+    chatJid,
+    sinceTimestamp,
+    ASSISTANT_NAME,
+  );
 
   if (missedMessages.length === 0) return true;
 
@@ -208,7 +217,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
+      logger.debug(
+        { group: group.name },
+        'Idle timeout, closing container stdin',
+      );
       queue.closeStdin(chatJid);
     }, IDLE_TIMEOUT);
   };
@@ -240,7 +252,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           statusTracker.markWorking(um.id);
         }
       }
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+      const raw =
+        typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
@@ -273,11 +288,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
         delete cursorBeforePipe[chatJid];
         saveState();
-        logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        logger.warn(
+          { group: group.name },
+          'Agent error after output, rolled back piped messages for retry',
+        );
         statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
         return false;
       }
-      logger.warn({ group: group.name }, 'Agent error after output was sent, no piped messages to recover');
+      logger.warn(
+        { group: group.name },
+        'Agent error after output was sent, no piped messages to recover',
+      );
       statusTracker.markAllDone(chatJid);
       return true;
     }
@@ -285,7 +306,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     delete cursorBeforePipe[chatJid];
     saveState();
-    logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    logger.warn(
+      { group: group.name },
+      'Agent error, rolled back message cursor for retry',
+    );
     statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
     return false;
   }
@@ -364,7 +388,8 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) =>
+        queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
 
@@ -433,7 +458,11 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const { messages, newTimestamp } = getNewMessages(
+        jids,
+        lastTimestamp,
+        ASSISTANT_NAME,
+      );
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -515,9 +544,14 @@ async function startMessageLoop(): Promise<void> {
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
               // Show typing indicator while the container processes the piped message
-              channel.setTyping?.(chatJid, true)?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
+              channel
+                .setTyping?.(chatJid, true)
+                ?.catch((err) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
+                );
             } else {
               // No active container — enqueue for a new one
               queue.enqueueMessageCheck(chatJid);
@@ -620,8 +654,13 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onChatMetadata: (
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
+    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
 
@@ -639,7 +678,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -671,9 +711,11 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     registerGroup,
     unregisterGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) =>
+      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
     recoverPendingMessages,
   });
@@ -688,7 +730,8 @@ async function main(): Promise<void> {
 // Guard: only run when executed directly, not when imported by tests
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {
