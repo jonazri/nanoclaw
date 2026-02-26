@@ -4,6 +4,9 @@ import path from 'path';
 import { DATA_DIR, CONTAINER_TIMEOUT } from './config.js';
 import { logger } from './logger.js';
 
+// DONE and FAILED share value 3: both are terminal states with monotonic
+// forward-only transitions (state >= current). The emoji differs but the
+// ordering logic treats them identically.
 export enum StatusState {
   RECEIVED = 0,
   THINKING = 1,
