@@ -154,4 +154,4 @@ Instead of a separate WhatsApp connection, add an enrollment mode to the main pr
 - See `memory/skills-engine.md` for skills engine gotchas (staging issue, structured ops limitations)
 - The `.nanoclaw/` directory already exists (initialized during shabbat-mode setup)
 - Node.js PATH for non-interactive shells: `export PATH="/home/yaz/.nvm/versions/node/v22.22.0/bin:$PATH"`
-- Origin remote is `jonazri/nanoclaw`, upstream is `qwibitai/nanoclaw`
+- Origin remote is `jonazri/gabay`, upstream is `qwibitai/nanoclaw`
