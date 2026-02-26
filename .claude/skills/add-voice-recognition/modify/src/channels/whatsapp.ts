@@ -5,6 +5,7 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
@@ -19,6 +20,7 @@ import {
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
@@ -223,10 +225,25 @@ export class WhatsAppChannel implements Channel {
           let finalContent = content;
           if (isVoiceMessage(msg)) {
             try {
+              const audioBuffer = (await downloadMediaMessage(
+                msg, 'buffer', {},
+                { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
+              )) as Buffer;
               const transcript = await transcribeAudioMessage(msg, this.sock);
               if (transcript) {
-                finalContent = `[Voice: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+                // Identify speaker from voice embedding
+                let speakerTag = '';
+                try {
+                  const speaker = await identifySpeaker(audioBuffer);
+                  if (speaker.speaker) {
+                    const matchPercent = Math.round(speaker.similarity * 100);
+                    speakerTag = ` (${speaker.confidence === 'high' ? 'Direct from' : 'Possibly'} ${speaker.speaker}, ${matchPercent}% match)`;
+                  }
+                } catch (speakerErr) {
+                  logger.warn({ err: speakerErr }, 'Speaker identification failed, continuing without');
+                }
+                finalContent = `[Voice${speakerTag}: ${transcript}]`;
+                logger.info({ chatJid, length: transcript.length, speakerTag }, 'Transcribed voice message');
               } else {
                 finalContent = '[Voice Message - transcription unavailable]';
               }

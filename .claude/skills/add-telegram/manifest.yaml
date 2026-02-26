@@ -16,5 +16,8 @@ structured:
     - TELEGRAM_BOT_TOKEN
     - TELEGRAM_ONLY
 conflicts: []
+incompatible_with:
+  - discord
+  - gmail
 depends: []
 test: "npx vitest run src/channels/telegram.test.ts"

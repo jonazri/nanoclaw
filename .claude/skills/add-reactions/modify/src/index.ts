@@ -3,14 +3,11 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  DISCORD_BOT_TOKEN,
-  DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -27,6 +24,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getMessageFromMe,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -478,17 +476,9 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (DISCORD_BOT_TOKEN) {
-    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
-    channels.push(discord);
-    await discord.connect();
-  }
-
-  if (!DISCORD_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -512,6 +502,18 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (messageId) {
+        if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
+        const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
+        await channel.sendReaction(jid, messageKey, emoji);
+      } else {
+        if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+        await channel.reactToLatestMessage(jid, emoji);
+      }
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

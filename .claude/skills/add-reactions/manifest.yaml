@@ -12,5 +12,7 @@ modifies:
   - src/index.ts
   - container/agent-runner/src/ipc-mcp-stdio.ts
 conflicts: []
+incompatible_with:
+  - voice-recognition
 depends: []
 test: "npx tsc --noEmit"

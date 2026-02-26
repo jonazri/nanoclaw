@@ -7,8 +7,11 @@ adds:
   - scripts/voice-recognition-service.py
 modifies:
   - src/channels/whatsapp.ts
-  - src/transcription.ts
 conflicts: []
-depends:
+incompatible_with:
+  - voice-transcription
   - voice-transcription-elevenlabs
+  - reactions
+depends: []
+tested_with: []
 test: "npx tsc --noEmit"
