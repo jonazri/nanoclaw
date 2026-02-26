@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# google-home — IPC wrapper for Google Assistant commands inside agent containers
+# Writes JSON task files to the IPC directory and polls for responses.
+
+set -euo pipefail
+
+IPC_DIR="/workspace/ipc"
+TASKS_DIR="${IPC_DIR}/tasks"
+RESPONSES_DIR="${IPC_DIR}/responses"
+POLL_INTERVAL=0.5
+TIMEOUT=30
+
+# Generate a unique request ID
+gen_request_id() {
+  echo "gh-$(date +%s)-${RANDOM}${RANDOM}"
+}
+
+# Write a task JSON file atomically (tmp + mv)
+write_task() {
+  local request_id="$1"
+  local text="$2"
+
+  local task_file="${TASKS_DIR}/${request_id}.json"
+  local tmp_file="${task_file}.tmp"
+
+  mkdir -p "$TASKS_DIR"
+
+  jq -n \
+    --arg type "google_assistant_command" \
+    --arg requestId "$request_id" \
+    --arg text "$text" \
+    '{ type: $type, requestId: $requestId, text: $text }' \
+    > "$tmp_file"
+
+  mv "$tmp_file" "$task_file"
+}
+
+# Poll for a response file, timeout after MAX_ATTEMPTS * POLL_INTERVAL seconds
+MAX_ATTEMPTS=60  # 60 * 0.5s = 30s
+
+poll_response() {
+  local request_id="$1"
+  local response_file="${RESPONSES_DIR}/${request_id}.json"
+  local attempt=0
+
+  while (( attempt < MAX_ATTEMPTS )); do
+    if [[ -f "$response_file" ]]; then
+      local content
+      content=$(cat "$response_file")
+      rm -f "$response_file"
+
+      # Check for error
+      local error
+      error=$(echo "$content" | jq -r '.error // empty')
+      if [[ -n "$error" ]]; then
+        echo "Error: $error" >&2
+        return 1
+      fi
+
+      # Print the text response
+      echo "$content" | jq -r '.text // .status // .'
+      return 0
+    fi
+
+    sleep "$POLL_INTERVAL"
+    (( attempt++ ))
+  done
+
+  echo "Error: Timed out waiting for response after ${TIMEOUT}s" >&2
+  return 1
+}
+
+# Send a command and wait for response
+send_and_wait() {
+  local text="$1"
+  local request_id
+  request_id=$(gen_request_id)
+
+  write_task "$request_id" "$text"
+  poll_response "$request_id"
+}
+
+# Print usage
+usage() {
+  cat <<'USAGE'
+google-home — Control smart home devices via Google Assistant
+
+Usage:
+  google-home command "turn on the living room lights"
+  google-home status
+  google-home reset
+  google-home automation
+  google-home help
+
+Subcommands:
+  command "text"   Send a text command to Google Assistant
+  status           Check Google Assistant health
+  reset            Reset the conversation state
+  automation       Show automation help (YAML generation)
+  help             Show this help message
+USAGE
+}
+
+# Print automation help
+automation_help() {
+  cat <<'AUTOMATION'
+Google Home Automations
+
+Automations are defined as YAML and pushed via the Google Home web UI using
+the agent-browser skill. The YAML schema is documented in SKILL.md.
+
+Workflow:
+  1. Generate the automation YAML based on the user's request
+  2. Use agent-browser to navigate to home.google.com
+  3. Create the automation through the web UI
+
+No IPC is needed for automation management — the agent handles it directly
+using the browser skill and the YAML schema from SKILL.md.
+AUTOMATION
+}
+
+# Main
+case "${1:-help}" in
+  command)
+    if [[ -z "${2:-}" ]]; then
+      echo "Error: command requires a text argument" >&2
+      echo "Usage: google-home command \"turn on the lights\"" >&2
+      exit 1
+    fi
+    send_and_wait "$2"
+    ;;
+  status)
+    send_and_wait "__health__"
+    ;;
+  reset)
+    send_and_wait "__reset_conversation__"
+    ;;
+  automation)
+    automation_help
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Error: Unknown subcommand '$1'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
