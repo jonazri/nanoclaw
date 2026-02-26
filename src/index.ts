@@ -15,19 +15,18 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import {
-  cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
+import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
+  getMessageFromMe,
   getNewMessages,
   getRouterState,
   initDatabase,
+  deleteRegisteredGroup,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -35,12 +34,16 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import { shutdownGoogleAssistant } from './google-assistant.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
+import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler, stopTokenRefreshScheduler } from './oauth.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -49,11 +52,15 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+// Tracks cursor value before messages were piped to an active container.
+// Used to roll back if the container dies after piping.
+let cursorBeforePipe: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -63,6 +70,13 @@ function loadState(): void {
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
+  }
+  const pipeCursor = getRouterState('cursor_before_pipe');
+  try {
+    cursorBeforePipe = pipeCursor ? JSON.parse(pipeCursor) : {};
+  } catch {
+    logger.warn('Corrupted cursor_before_pipe in DB, resetting');
+    cursorBeforePipe = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -74,7 +88,14 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState(
+    'last_agent_timestamp',
+    JSON.stringify(lastAgentTimestamp),
+  );
+  setRouterState(
+    'cursor_before_pipe',
+    JSON.stringify(cursorBeforePipe),
+  );
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -101,6 +122,15 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+function unregisterGroup(jid: string): boolean {
+  const deleted = deleteRegisteredGroup(jid);
+  if (deleted) {
+    delete registeredGroups[jid];
+    logger.info({ jid }, 'Group unregistered');
+  }
+  return deleted;
+}
+
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
@@ -120,9 +150,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 }
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(
-  groups: Record<string, RegisteredGroup>,
-): void {
+export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
   registeredGroups = groups;
 }
 
@@ -134,20 +162,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
+  if (isShabbatOrYomTov()) {
+    logger.debug({ group: group.name }, 'Shabbat/Yom Tov active, skipping message processing');
+    return true;
+  }
+
   const channel = findChannel(channels, chatJid);
   if (!channel) {
-    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
     return true;
   }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-    ASSISTANT_NAME,
-  );
+  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
@@ -179,25 +208,39 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug(
-        { group: group.name },
-        'Idle timeout, closing container stdin',
-      );
+      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
       queue.closeStdin(chatJid);
     }, IDLE_TIMEOUT);
   };
 
+  // Ensure all user messages are tracked — recovery messages enter processGroupMessages
+  // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
+  // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
+  for (const msg of missedMessages) {
+    statusTracker.markReceived(msg.id, chatJid, false);
+  }
+
+  // Mark all user messages as thinking (container is spawning)
+  const userMessages = missedMessages.filter((m) => !m.is_from_me && !m.is_bot_message);
+  for (const msg of userMessages) {
+    statusTracker.markThinking(msg.id);
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        for (const um of userMessages) {
+          statusTracker.markWorking(um.id);
+        }
+      }
+      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
@@ -210,6 +253,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      statusTracker.markAllDone(chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -222,26 +266,43 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      logger.warn(
-        { group: group.name },
-        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
-      );
+      // Output was sent for the initial batch, so don't roll those back.
+      // But if messages were piped AFTER that output, roll back to recover them.
+      if (cursorBeforePipe[chatJid]) {
+        lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
+        delete cursorBeforePipe[chatJid];
+        saveState();
+        logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
+        return false;
+      }
+      logger.warn({ group: group.name }, 'Agent error after output was sent, no piped messages to recover');
+      statusTracker.markAllDone(chatJid);
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // No output sent — roll back everything so the full batch is retried
     lastAgentTimestamp[chatJid] = previousCursor;
+    delete cursorBeforePipe[chatJid];
     saveState();
-    logger.warn(
-      { group: group.name },
-      'Agent error, rolled back message cursor for retry',
-    );
+    logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
     return false;
   }
 
+  // Success — clear pipe tracking (markAllDone already fired in streaming callback)
+  delete cursorBeforePipe[chatJid];
+  saveState();
   return true;
+}
+
+function notifyMainGroup(text: string): void {
+  const mainJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+  )?.[0];
+  if (!mainJid) return;
+  const channel = findChannel(channels, mainJid);
+  channel?.sendMessage(mainJid, text);
 }
 
 async function runAgent(
@@ -290,6 +351,9 @@ async function runAgent(
     : undefined;
 
   try {
+    // Pre-flight: refresh token if expired or expiring soon
+    await ensureTokenFresh();
+
     const output = await runContainerAgent(
       group,
       {
@@ -300,8 +364,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
 
@@ -311,6 +374,39 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
+        logger.warn({ group: group.name }, 'Auth error detected, refreshing token and retrying');
+        // Roll back any messages piped during the dead container's lifetime
+        // so they're not lost — the retry only replays the original prompt.
+        if (cursorBeforePipe[chatJid]) {
+          lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
+          delete cursorBeforePipe[chatJid];
+          saveState();
+          logger.info({ group: group.name }, 'Rolled back piped messages before auth retry');
+        }
+        notifyMainGroup('[system] Auth token expired — refreshing and retrying.');
+        const refreshed = await refreshOAuthToken();
+        if (refreshed) {
+          const retry = await runContainerAgent(
+            group,
+            { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
+            (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+            wrappedOnOutput,
+          );
+          if (retry.newSessionId) {
+            sessions[group.folder] = retry.newSessionId;
+            setSession(group.folder, retry.newSessionId);
+          }
+          if (retry.status === 'error') {
+            logger.error({ group: group.name, error: retry.error }, 'Container agent error after token refresh');
+            notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+            return 'error';
+          }
+          notifyMainGroup('[system] Token refreshed. Services restored.');
+          return 'success';
+        }
+        notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -337,11 +433,7 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
-        jids,
-        lastTimestamp,
-        ASSISTANT_NAME,
-      );
+      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -350,69 +442,89 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp = newTimestamp;
         saveState();
 
-        // Deduplicate by group
-        const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of messages) {
-          const existing = messagesByGroup.get(msg.chat_jid);
-          if (existing) {
-            existing.push(msg);
-          } else {
-            messagesByGroup.set(msg.chat_jid, [msg]);
-          }
-        }
-
-        for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
-
-          const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-            continue;
+        if (!isShabbatOrYomTov()) {
+          // Deduplicate by group
+          const messagesByGroup = new Map<string, NewMessage[]>();
+          for (const msg of messages) {
+            const existing = messagesByGroup.get(msg.chat_jid);
+            if (existing) {
+              existing.push(msg);
+            } else {
+              messagesByGroup.set(msg.chat_jid, [msg]);
+            }
           }
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          for (const [chatJid, groupMessages] of messagesByGroup) {
+            const group = registeredGroups[chatJid];
+            if (!group) continue;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+            const channel = findChannel(channels, chatJid);
+            if (!channel) {
+              console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+              continue;
+            }
+
+            const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+            // For non-main groups, only act on trigger messages.
+            // Non-trigger messages accumulate in DB and get pulled as
+            // context when a trigger eventually arrives.
+            if (needsTrigger) {
+              const hasTrigger = groupMessages.some((m) =>
+                TRIGGER_PATTERN.test(m.content.trim()),
+              );
+              if (!hasTrigger) continue;
+            }
+
+            // Mark each user message as received (main group only, status emoji)
+            for (const msg of groupMessages) {
+              if (!msg.is_from_me && !msg.is_bot_message) {
+                statusTracker.markReceived(msg.id, chatJid, false);
+              }
+            }
+
+            // Pull all messages since lastAgentTimestamp so non-trigger
+            // context that accumulated between triggers is included.
+            const allPending = getMessagesSince(
+              chatJid,
+              lastAgentTimestamp[chatJid] || '',
+              ASSISTANT_NAME,
             );
-            if (!hasTrigger) continue;
-          }
+            const messagesToSend =
+              allPending.length > 0 ? allPending : groupMessages;
+            const formatted = formatMessages(messagesToSend);
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
-
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
+            if (queue.sendMessage(chatJid, formatted)) {
+              logger.debug(
+                { chatJid, count: messagesToSend.length },
+                'Piped messages to active container',
+              );
+              // Mark new user messages as thinking (only groupMessages were markReceived'd;
+              // accumulated allPending context messages are untracked and would no-op)
+              for (const msg of groupMessages) {
+                if (!msg.is_from_me && !msg.is_bot_message) {
+                  statusTracker.markThinking(msg.id);
+                }
+              }
+              // Save cursor before first pipe so we can roll back if container dies
+              if (!cursorBeforePipe[chatJid]) {
+                cursorBeforePipe[chatJid] = lastAgentTimestamp[chatJid] || '';
+              }
+              lastAgentTimestamp[chatJid] =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              saveState();
+              // Show typing indicator while the container processes the piped message
+              channel.setTyping?.(chatJid, true)?.catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+            } else {
+              // No active container — enqueue for a new one
+              queue.enqueueMessageCheck(chatJid);
+            }
           }
+        } else {
+          logger.debug('Shabbat/Yom Tov active, skipping message processing');
         }
       }
     } catch (err) {
@@ -427,6 +539,20 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  // Roll back any piped-message cursors that were persisted before a crash.
+  // This ensures messages piped to a now-dead container are re-fetched.
+  for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
+    logger.info(
+      { chatJid, rolledBackTo: savedCursor },
+      'Recovery: rolling back piped-message cursor',
+    );
+    lastAgentTimestamp[chatJid] = savedCursor;
+  }
+  if (Object.keys(cursorBeforePipe).length > 0) {
+    cursorBeforePipe = {};
+    saveState();
+  }
+
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
@@ -451,11 +577,41 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => {
+      const group = registeredGroups[chatJid];
+      return group?.folder === MAIN_GROUP_FOLDER;
+    },
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  // Note: recover() is called AFTER channels connect, so reactions can actually be sent
+
+  initShabbatSchedule();
+
+  // Ensure token is fresh at startup so the first container doesn't hit an expired token
+  await ensureTokenFresh();
+
+  // Schedule proactive token refresh (replaces systemd-run scheduling)
+  startTokenRefreshScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await statusTracker.shutdown();
     for (const ch of channels) await ch.disconnect();
+    stopTokenRefreshScheduler();
+    shutdownGoogleAssistant();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -464,13 +620,8 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
+      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
 
@@ -479,17 +630,20 @@ async function main(): Promise<void> {
   channels.push(whatsapp);
   await whatsapp.connect();
 
+  // Recover status tracker AFTER channels are connected, so recovery ❌ reactions
+  // can actually be sent via the WhatsApp channel.
+  await statusTracker.recover();
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
+        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
         return;
       }
       const text = formatOutbound(rawText);
@@ -502,13 +656,26 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (messageId) {
+        if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
+        const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
+        await channel.sendReaction(jid, messageKey, emoji);
+      } else {
+        if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+        await channel.reactToLatestMessage(jid, emoji);
+      }
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    unregisterGroup,
+    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    statusHeartbeat: () => statusTracker.heartbeatCheck(),
+    recoverPendingMessages,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
@@ -521,8 +688,7 @@ async function main(): Promise<void> {
 // Guard: only run when executed directly, not when imported by tests
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
+  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

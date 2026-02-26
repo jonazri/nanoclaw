@@ -14,9 +14,11 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "setup": "tsx setup/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate-zmanim": "tsx scripts/generate-zmanim.ts"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.36.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
@@ -28,6 +30,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@hebcal/core": "^6.0.8",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@types/qrcode-terminal": "^0.12.2",

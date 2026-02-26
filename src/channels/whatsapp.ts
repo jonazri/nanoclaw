@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 
 import makeWASocket, {
@@ -11,19 +12,20 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import {
-  ASSISTANT_HAS_OWN_NUMBER,
-  ASSISTANT_NAME,
-  STORE_DIR,
-} from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
-import {
-  Channel,
-  OnInboundMessage,
-  OnChatMetadata,
-  RegisteredGroup,
-} from '../types.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker } from '../voice-recognition.js';
+import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+
+const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -42,6 +44,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempt = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -61,11 +64,9 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    // undefined version falls through to Baileys' built-in default
     const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-      logger.warn(
-        { err },
-        'Failed to fetch latest WA Web version, using default',
-      );
+      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
       return { version: undefined };
     });
     this.sock = makeWASocket({
@@ -94,35 +95,26 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (
-          lastDisconnect?.error as { output?: { statusCode?: number } }
-        )?.output?.statusCode;
+        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info(
-          {
-            reason,
-            shouldReconnect,
-            queuedMessages: this.outgoingQueue.length,
-          },
-          'Connection closed',
-        );
+        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 60000);
+          this.reconnectAttempt++;
+          logger.info({ delay, attempt: this.reconnectAttempt }, 'Reconnecting...');
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'Reconnect failed');
+            });
+          }, delay);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempt = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -184,13 +176,7 @@ export class WhatsAppChannel implements Channel {
 
         // Always notify about chat metadata for group discovery
         const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(
-          chatJid,
-          timestamp,
-          undefined,
-          'whatsapp',
-          isGroup,
-        );
+        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
@@ -203,7 +189,8 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          // but let voice messages through for transcription
+          if (!content && !isVoiceMessage(msg)) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -217,16 +204,123 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
+          // Transcribe voice messages and identify speaker
+          let finalContent = content;
+          if (isVoiceMessage(msg)) {
+            try {
+              const { transcript, audioBuffer } = await transcribeAudioMessage(msg, this.sock);
+
+              // Save raw audio for enrollment/debugging
+              if (audioBuffer) {
+                try {
+                  await fsPromises.mkdir(VOICE_AUDIO_DIR, { recursive: true });
+                  const audioPath = path.join(VOICE_AUDIO_DIR, `${Date.now()}.ogg`);
+                  await fsPromises.writeFile(audioPath, audioBuffer);
+                  logger.debug({ audioPath }, 'Saved voice audio');
+                } catch (saveErr) {
+                  logger.warn({ err: saveErr }, 'Failed to save voice audio');
+                }
+              }
+
+              // Identify speaker
+              let speakerTag = '';
+              if (audioBuffer) {
+                try {
+                  const result = await identifySpeaker(audioBuffer);
+                  if (result.speaker) {
+                    const pct = Math.round(result.similarity * 100);
+                    speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+
+                    // Continuous learning: update profile with high-confidence samples
+                    if (result.speaker === 'Yonatan' && result.similarity >= 0.65) {
+                      try {
+                        const { extractVoiceEmbedding, updateVoiceProfile } = await import('../voice-recognition.js');
+                        const embedding = await extractVoiceEmbedding(audioBuffer!);
+                        await updateVoiceProfile('Yonatan', [embedding]);
+                        logger.info(
+                          { similarity: result.similarity },
+                          'Auto-updated voice profile with new sample',
+                        );
+                      } catch (learnErr) {
+                        logger.warn({ err: learnErr }, 'Failed to auto-update voice profile');
+                      }
+                    }
+                  } else {
+                    speakerTag = ' [Unknown speaker]';
+                  }
+                } catch (idErr) {
+                  logger.warn({ err: idErr }, 'Speaker identification failed');
+                }
+              }
+
+              if (transcript) {
+                finalContent = `[Voice: ${transcript}]${speakerTag}`;
+                logger.info({ chatJid, length: transcript.length, speakerTag }, 'Transcribed voice message');
+              } else {
+                finalContent = '[Voice Message - transcription unavailable]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription error');
+              finalContent = '[Voice Message - transcription failed]';
+            }
+          }
+
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content,
+            content: finalContent,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
           });
+        }
+      }
+    });
+
+    // Listen for message reactions
+    this.sock.ev.on('messages.reaction', async (reactions) => {
+      for (const { key, reaction } of reactions) {
+        try {
+          const messageId = key.id;
+          if (!messageId) continue;
+
+          const rawChatJid = key.remoteJid;
+          if (!rawChatJid || rawChatJid === 'status@broadcast') continue;
+
+          const chatJid = await this.translateJid(rawChatJid);
+
+          const groups = this.opts.registeredGroups();
+          if (!groups[chatJid]) continue;
+
+          // reaction.key identifies the reactor; key identifies the reacted-to message
+          const reactorJid = reaction.key?.participant || reaction.key?.remoteJid || '';
+          const emoji = reaction.text || '';
+          const timestamp = reaction.senderTimestampMs
+            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+            : new Date().toISOString();
+
+          storeReaction({
+            message_id: messageId,
+            message_chat_jid: chatJid,
+            reactor_jid: reactorJid,
+            reactor_name: reactorJid.split('@')[0],
+            emoji,
+            timestamp,
+          });
+
+          logger.info(
+            {
+              chatJid,
+              messageId: messageId.slice(0, 10) + '...',
+              reactor: reactorJid.split('@')[0],
+              emoji: emoji || '(removed)',
+            },
+            emoji ? 'Reaction added' : 'Reaction removed',
+          );
+        } catch (err) {
+          logger.error({ err }, 'Failed to process reaction');
         }
       }
     });
@@ -243,10 +337,7 @@ export class WhatsAppChannel implements Channel {
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info(
-        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
-        'WA disconnected, message queued',
-      );
+      logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
       return;
     }
     try {
@@ -255,10 +346,7 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.warn(
-        { jid, err, queueSize: this.outgoingQueue.length },
-        'Failed to send, message queued',
-      );
+      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
     }
   }
 
@@ -273,6 +361,53 @@ export class WhatsAppChannel implements Channel {
   async disconnect(): Promise<void> {
     this.connected = false;
     this.sock?.end(undefined);
+  }
+
+  async sendReaction(
+    chatJid: string,
+    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
+    emoji: string
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
+      throw new Error('Not connected to WhatsApp');
+    }
+
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: {
+          text: emoji,
+          key: messageKey,
+        },
+      });
+
+      logger.info(
+        {
+          chatJid,
+          messageId: messageKey.id?.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed'
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
+    const latest = getLatestMessage(chatJid);
+    if (!latest) {
+      throw new Error(`No messages found for chat ${chatJid}`);
+    }
+
+    const messageKey = {
+      id: latest.id,
+      remoteJid: chatJid,
+      fromMe: latest.fromMe,
+    };
+
+    await this.sendReaction(chatJid, messageKey, emoji);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -328,10 +463,7 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug(
-        { lidJid: jid, phoneJid: cached },
-        'Translated LID to phone JID (cached)',
-      );
+      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
       return cached;
     }
 
@@ -341,10 +473,7 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info(
-          { lidJid: jid, phoneJid },
-          'Translated LID to phone JID (signalRepository)',
-        );
+        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
         return phoneJid;
       }
     } catch (err) {
@@ -358,18 +487,12 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info(
-        { count: this.outgoingQueue.length },
-        'Flushing outgoing message queue',
-      );
+      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
         await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info(
-          { jid: item.jid, length: item.text.length },
-          'Queued message sent',
-        );
+        logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
       }
     } finally {
       this.flushing = false;

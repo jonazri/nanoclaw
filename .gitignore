@@ -17,8 +17,6 @@ groups/main/*
 groups/global/*
 !groups/main/CLAUDE.md
 !groups/main/feature-requests/
-groups/main/feature-requests/*
-!groups/main/feature-requests/.gitkeep
 !groups/global/CLAUDE.md
 
 # Secrets
