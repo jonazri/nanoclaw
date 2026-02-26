@@ -1,0 +1,15 @@
+skill: refresh-oauth
+version: 1.0.0
+description: "Container agent can request OAuth token refresh via IPC"
+core_version: 0.1.0
+adds:
+  - container/skills/refresh-oauth/SKILL.md
+  - scripts/oauth/refresh.sh
+  - scripts/oauth/README.md
+modifies:
+  - src/ipc.ts
+conflicts: []
+incompatible_with: []
+depends: []
+tested_with: []
+test: "npx tsc --noEmit"

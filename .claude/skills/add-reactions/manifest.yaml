@@ -4,6 +4,7 @@ description: "WhatsApp emoji reaction support"
 core_version: 0.1.0
 adds:
   - scripts/migrate-reactions.ts
+  - container/skills/reactions/SKILL.md
 modifies:
   - src/db.ts
   - src/channels/whatsapp.ts
