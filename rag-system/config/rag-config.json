@@ -21,6 +21,6 @@
   "ingestion": {
     "batchSize": 100,
     "pollIntervalMs": 300000,
-    "nanoclawDbPath": "/home/yaz/code/yonibot/nanoclaw/store/messages.db"
+    "nanoclawDbPath": "/home/yaz/code/yonibot/gabay/store/messages.db"
   }
 }

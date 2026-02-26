@@ -61,7 +61,7 @@ systemctl --user restart nanoclaw
 ## Logs
 
 ```bash
-tail -f ~/code/yonibot/nanoclaw/logs/nanoclaw.log
+tail -f ~/code/yonibot/gabay/logs/nanoclaw.log
 ```
 
 ## Scratch Scripts
