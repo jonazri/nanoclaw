@@ -68,17 +68,8 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
-function setupLaunchd(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
-  const plistPath = path.join(
-    homeDir,
-    'Library',
-    'LaunchAgents',
-    'com.nanoclaw.plist',
-  );
+function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): void {
+  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.nanoclaw.plist');
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -116,9 +107,7 @@ function setupLaunchd(
   logger.info({ plistPath }, 'Wrote launchd plist');
 
   try {
-    execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
-      stdio: 'ignore',
-    });
+    execSync(`launchctl load ${JSON.stringify(plistPath)}`, { stdio: 'ignore' });
     logger.info('launchctl load succeeded');
   } catch {
     logger.warn('launchctl load failed (may already be loaded)');
@@ -144,11 +133,7 @@ function setupLaunchd(
   });
 }
 
-function setupLinux(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
+function setupLinux(projectRoot: string, nodePath: string, homeDir: string): void {
   const serviceManager = getServiceManager();
 
   if (serviceManager === 'systemd') {
@@ -201,11 +186,7 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
-function setupSystemd(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
+function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): void {
   const runningAsRoot = isRoot();
 
   // Root uses system-level service, non-root uses user-level
@@ -221,9 +202,7 @@ function setupSystemd(
     try {
       execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch {
-      logger.warn(
-        'systemd user session not available — falling back to nohup wrapper',
-      );
+      logger.warn('systemd user session not available — falling back to nohup wrapper');
       setupNohupFallback(projectRoot, nodePath, homeDir);
       return;
     }
@@ -305,11 +284,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   });
 }
 
-function setupNohupFallback(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
+function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: string): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');

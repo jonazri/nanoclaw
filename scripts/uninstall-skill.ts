@@ -13,9 +13,7 @@ async function main() {
 
   if (result.customPatchWarning) {
     console.warn(`\nWarning: ${result.customPatchWarning}`);
-    console.warn(
-      'To proceed, remove the custom_patch from state.yaml and re-run.',
-    );
+    console.warn('To proceed, remove the custom_patch from state.yaml and re-run.');
     process.exit(1);
   }
 
