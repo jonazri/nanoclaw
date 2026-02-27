@@ -472,14 +472,16 @@ async function runAgent(
   }
 }
 
-async function sendPostShabbatSummary(): Promise<void> {
+async function sendPostShabbatSummary(): Promise<string[]> {
+  const pendingJids: string[] = [];
+
   const userJid = Object.entries(registeredGroups).find(
     ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
-  if (!userJid) return;
+  if (!userJid) return pendingJids;
 
   const channel = findChannel(channels, userJid);
-  if (!channel) return;
+  if (!channel) return pendingJids;
 
   const summaryLines: string[] = [];
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
@@ -487,6 +489,7 @@ async function sendPostShabbatSummary(): Promise<void> {
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       summaryLines.push(`• ${group.name}: ${pending.length} messages`);
+      pendingJids.push(chatJid);
     }
   }
 
@@ -500,6 +503,8 @@ async function sendPostShabbatSummary(): Promise<void> {
     { groupsWithActivity: summaryLines.length },
     'Post-Shabbat summary sent',
   );
+
+  return pendingJids;
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -519,13 +524,9 @@ async function startMessageLoop(): Promise<void> {
 
       // Post-Shabbat catch-up: send summary and re-queue pending messages
       if (wasShabbat && !currentlyShabbat) {
-        await sendPostShabbatSummary();
-        for (const chatJid of Object.keys(registeredGroups)) {
-          const sinceTs = lastAgentTimestamp[chatJid] || '';
-          const pending = getMessagesSince(chatJid, sinceTs, ASSISTANT_NAME);
-          if (pending.length > 0) {
-            queue.enqueueMessageCheck(chatJid);
-          }
+        const pendingJids = await sendPostShabbatSummary();
+        for (const chatJid of pendingJids) {
+          queue.enqueueMessageCheck(chatJid);
         }
       }
       wasShabbat = currentlyShabbat;
@@ -759,6 +760,8 @@ async function main(): Promise<void> {
     startCandleLightingNotifier((text) =>
       whatsapp.sendMessage(userJid, text),
     );
+  } else {
+    logger.warn('No main group registered — candle lighting notifier disabled');
   }
 
   // Start subsystems (independently of connection handler)

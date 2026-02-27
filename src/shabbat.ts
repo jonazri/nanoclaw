@@ -105,16 +105,27 @@ export function getNextCandleLighting(): {
   const now = Date.now();
   const offset = CANDLE_LIGHTING_MINUTES * 60 * 1000;
 
-  for (let i = 0; i < windowStarts.length; i++) {
-    const candleLighting = windowStarts[i] - offset;
+  // Binary search for the first window whose candle lighting is in the future
+  let lo = 0;
+  let hi = windowStarts.length - 1;
+  let candidate = -1;
+
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const candleLighting = windowStarts[mid] - offset;
     if (candleLighting > now) {
-      return {
-        time: new Date(candleLighting),
-        label: schedule.windows[i].label,
-      };
+      candidate = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
     }
   }
-  return null;
+
+  if (candidate === -1) return null;
+  return {
+    time: new Date(windowStarts[candidate] - offset),
+    label: schedule.windows[candidate].label,
+  };
 }
 
 let notifierTimer: ReturnType<typeof setInterval> | null = null;
@@ -141,8 +152,9 @@ export function startCandleLightingNotifier(
     if (timeUntil > 0 && timeUntil <= NOTIFY_HORIZON_MS) {
       lastNotifiedStart = windowStart;
       const timeStr = formatTime(next.time);
-      const label =
-        next.label === 'Shabbat' ? 'Shabbat Shalom! ' : `${next.label} — `;
+      const label = next.label.includes('Shabbat')
+        ? 'Shabbat Shalom! '
+        : `${next.label} — `;
       notify(`${label}Candle lighting at ${timeStr}`);
     }
   };

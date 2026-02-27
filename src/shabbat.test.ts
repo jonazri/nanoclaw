@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   isShabbatOrYomTov,
   getNextCandleLighting,
+  startCandleLightingNotifier,
+  stopCandleLightingNotifier,
   _loadScheduleForTest,
 } from './shabbat.js';
 
@@ -116,5 +118,69 @@ describe('getNextCandleLighting', () => {
   it('returns null after all windows', () => {
     vi.setSystemTime(new Date('2027-01-01T00:00:00.000Z'));
     expect(getNextCandleLighting()).toBeNull();
+  });
+
+  it('skips current window during Shabbat and returns next', () => {
+    // Saturday morning during first window — candle lighting already passed
+    vi.setSystemTime(new Date('2026-02-21T10:00:00.000Z'));
+    const result = getNextCandleLighting();
+    expect(result).not.toBeNull();
+    // Should return second window (Feb 27), not the current one (Feb 20)
+    expect(result!.time.toISOString()).toBe('2026-02-27T17:10:00.000Z');
+    expect(result!.label).toBe('Shabbat');
+  });
+});
+
+describe('startCandleLightingNotifier', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    _loadScheduleForTest(TEST_SCHEDULE);
+  });
+  afterEach(() => {
+    stopCandleLightingNotifier();
+    vi.useRealTimers();
+  });
+
+  it('fires notification within 6-hour horizon', () => {
+    // 3 hours before candle lighting (17:02 UTC) → 14:02 UTC
+    vi.setSystemTime(new Date('2026-02-20T14:02:00.000Z'));
+    const notify = vi.fn();
+    startCandleLightingNotifier(notify);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify.mock.calls[0][0]).toMatch(/Shabbat Shalom/);
+    expect(notify.mock.calls[0][0]).toMatch(/Candle lighting at/);
+  });
+
+  it('does not fire when outside 6-hour horizon', () => {
+    // 8 hours before candle lighting — outside the 6h window
+    vi.setSystemTime(new Date('2026-02-20T09:00:00.000Z'));
+    const notify = vi.fn();
+    startCandleLightingNotifier(notify);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('fires only once per window across multiple checks', () => {
+    // 3 hours before candle lighting
+    vi.setSystemTime(new Date('2026-02-20T14:02:00.000Z'));
+    const notify = vi.fn();
+    startCandleLightingNotifier(notify);
+    expect(notify).toHaveBeenCalledOnce();
+
+    // Advance 30 min (one check interval) — still same window
+    vi.advanceTimersByTime(30 * 60 * 1000);
+    expect(notify).toHaveBeenCalledOnce();
+
+    // Advance another 30 min — still same window
+    vi.advanceTimersByTime(30 * 60 * 1000);
+    expect(notify).toHaveBeenCalledOnce();
+  });
+
+  it('uses "Shabbat Shalom!" for combined Shabbat labels', () => {
+    // 3 hours before third window (Shabbat / Pesach, shkiya 17:40, candle lighting 17:22)
+    vi.setSystemTime(new Date('2026-03-20T14:22:00.000Z'));
+    const notify = vi.fn();
+    startCandleLightingNotifier(notify);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify.mock.calls[0][0]).toMatch(/^Shabbat Shalom!/);
   });
 });
