@@ -19,7 +19,6 @@ import {
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { identifySpeaker } from '../voice-recognition.js';
 import {
   Channel,
@@ -206,8 +205,7 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          // but allow voice messages through for transcription
-          if (!content && !isVoiceMessage(msg)) continue;
+          if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -221,35 +219,22 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
-          // Transcribe voice messages before storing
-          let finalContent = content;
-          if (isVoiceMessage(msg)) {
+          // Identify speaker from voice message embedding
+          let speakerTag = '';
+          if (msg.message?.audioMessage?.ptt === true) {
             try {
               const audioBuffer = (await downloadMediaMessage(
                 msg, 'buffer', {},
                 { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
               )) as Buffer;
-              const transcript = await transcribeAudioMessage(msg, this.sock);
-              if (transcript) {
-                // Identify speaker from voice embedding
-                let speakerTag = '';
-                try {
-                  const speaker = await identifySpeaker(audioBuffer);
-                  if (speaker.speaker) {
-                    const matchPercent = Math.round(speaker.similarity * 100);
-                    speakerTag = ` (${speaker.confidence === 'high' ? 'Direct from' : 'Possibly'} ${speaker.speaker}, ${matchPercent}% match)`;
-                  }
-                } catch (speakerErr) {
-                  logger.warn({ err: speakerErr }, 'Speaker identification failed, continuing without');
-                }
-                finalContent = `[Voice${speakerTag}: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length, speakerTag }, 'Transcribed voice message');
-              } else {
-                finalContent = '[Voice Message - transcription unavailable]';
+              const speaker = await identifySpeaker(audioBuffer);
+              if (speaker.speaker) {
+                const matchPercent = Math.round(speaker.similarity * 100);
+                speakerTag = ` (${speaker.confidence === 'high' ? 'Direct from' : 'Possibly'} ${speaker.speaker}, ${matchPercent}% match)`;
+                logger.info({ chatJid, speaker: speaker.speaker, matchPercent }, 'Identified voice speaker');
               }
-            } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              finalContent = '[Voice Message - transcription failed]';
+            } catch (speakerErr) {
+              logger.warn({ err: speakerErr }, 'Speaker identification failed, continuing without');
             }
           }
 
@@ -258,7 +243,7 @@ export class WhatsAppChannel implements Channel {
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content: finalContent,
+            content,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,

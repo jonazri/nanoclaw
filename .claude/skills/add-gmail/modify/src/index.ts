@@ -9,13 +9,13 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
-import { GmailChannel } from './channels/gmail.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { GmailChannel } from './channels/gmail.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,

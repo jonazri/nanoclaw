@@ -39,9 +39,9 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -356,74 +356,77 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp = newTimestamp;
         saveState();
 
-        if (!isShabbatOrYomTov()) {
-          // Deduplicate by group
-          const messagesByGroup = new Map<string, NewMessage[]>();
-          for (const msg of messages) {
-            const existing = messagesByGroup.get(msg.chat_jid);
-            if (existing) {
-              existing.push(msg);
-            } else {
-              messagesByGroup.set(msg.chat_jid, [msg]);
-            }
-          }
-
-          for (const [chatJid, groupMessages] of messagesByGroup) {
-            const group = registeredGroups[chatJid];
-            if (!group) continue;
-
-            const channel = findChannel(channels, chatJid);
-            if (!channel) {
-              logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-              continue;
-            }
-
-            const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-
-            // For non-main groups, only act on trigger messages.
-            // Non-trigger messages accumulate in DB and get pulled as
-            // context when a trigger eventually arrives.
-            if (needsTrigger) {
-              const hasTrigger = groupMessages.some((m) =>
-                TRIGGER_PATTERN.test(m.content.trim()),
-              );
-              if (!hasTrigger) continue;
-            }
-
-            // Pull all messages since lastAgentTimestamp so non-trigger
-            // context that accumulated between triggers is included.
-            const allPending = getMessagesSince(
-              chatJid,
-              lastAgentTimestamp[chatJid] || '',
-              ASSISTANT_NAME,
-            );
-            const messagesToSend =
-              allPending.length > 0 ? allPending : groupMessages;
-            const formatted = formatMessages(messagesToSend);
-
-            if (queue.sendMessage(chatJid, formatted)) {
-              logger.debug(
-                { chatJid, count: messagesToSend.length },
-                'Piped messages to active container',
-              );
-              lastAgentTimestamp[chatJid] =
-                messagesToSend[messagesToSend.length - 1].timestamp;
-              saveState();
-              // Show typing indicator while the container processes the piped message
-              channel
-                .setTyping?.(chatJid, true)
-                ?.catch((err) =>
-                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-                );
-            } else {
-              // No active container — enqueue for a new one
-              queue.enqueueMessageCheck(chatJid);
-            }
-          }
-        } else {
+        // Skip processing during Shabbat/Yom Tov (messages are stored but not acted on)
+        if (isShabbatOrYomTov()) {
           logger.debug('Shabbat/Yom Tov active, skipping message processing');
+        } else {
+
+        // Deduplicate by group
+        const messagesByGroup = new Map<string, NewMessage[]>();
+        for (const msg of messages) {
+          const existing = messagesByGroup.get(msg.chat_jid);
+          if (existing) {
+            existing.push(msg);
+          } else {
+            messagesByGroup.set(msg.chat_jid, [msg]);
+          }
         }
+
+        for (const [chatJid, groupMessages] of messagesByGroup) {
+          const group = registeredGroups[chatJid];
+          if (!group) continue;
+
+          const channel = findChannel(channels, chatJid);
+          if (!channel) {
+            logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+            continue;
+          }
+
+          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+          // For non-main groups, only act on trigger messages.
+          // Non-trigger messages accumulate in DB and get pulled as
+          // context when a trigger eventually arrives.
+          if (needsTrigger) {
+            const hasTrigger = groupMessages.some((m) =>
+              TRIGGER_PATTERN.test(m.content.trim()),
+            );
+            if (!hasTrigger) continue;
+          }
+
+          // Pull all messages since lastAgentTimestamp so non-trigger
+          // context that accumulated between triggers is included.
+          const allPending = getMessagesSince(
+            chatJid,
+            lastAgentTimestamp[chatJid] || '',
+            ASSISTANT_NAME,
+          );
+          const messagesToSend =
+            allPending.length > 0 ? allPending : groupMessages;
+          const formatted = formatMessages(messagesToSend);
+
+          if (queue.sendMessage(chatJid, formatted)) {
+            logger.debug(
+              { chatJid, count: messagesToSend.length },
+              'Piped messages to active container',
+            );
+            lastAgentTimestamp[chatJid] =
+              messagesToSend[messagesToSend.length - 1].timestamp;
+            saveState();
+            // Show typing indicator while the container processes the piped message
+            channel
+              .setTyping?.(chatJid, true)
+              ?.catch((err) =>
+                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+              );
+          } else {
+            // No active container — enqueue for a new one
+            queue.enqueueMessageCheck(chatJid);
+          }
+        }
+
+        } // end isShabbatOrYomTov else
       }
     } catch (err) {
       logger.error({ err }, 'Error in message loop');

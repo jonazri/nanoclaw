@@ -78,7 +78,7 @@ export class SlackChannel implements Channel {
 
       if (!msg.text) return;
 
-      // Threaded replies are flattened into the channel conversation.
+      // Threaded replies (thread_ts) are flattened into the channel conversation.
       // The agent sees them alongside channel-level messages; responses
       // always go to the channel, not back into the thread.
 
@@ -100,9 +100,10 @@ export class SlackChannel implements Channel {
       if (isBotMessage) {
         senderName = ASSISTANT_NAME;
       } else {
+        const userId = 'user' in msg ? msg.user : undefined;
         senderName =
-          (await this.resolveUserName(msg.user)) ||
-          msg.user ||
+          (userId ? await this.resolveUserName(userId) : undefined) ||
+          userId ||
           'unknown';
       }
 
