@@ -5,16 +5,16 @@ description: "Pause all activity during Shabbat and Yom Tov"
 
 # Add Shabbat Mode
 
-This skill pauses all NanoClaw outbound activity during Shabbat and Yom Tov. Messages received during these times are stored in the database but not processed. After Shabbat/Yom Tov ends, the message loop picks up queued messages on its next poll cycle.
+Pauses all NanoClaw outbound activity during Shabbat and Yom Tov. Messages received during these times are stored but not processed. After Shabbat ends, the message loop picks up queued messages on its next poll cycle. Optionally sends candle lighting reminders every erev Shabbat and erev Yom Tov.
 
 ## Timing Reference
 
-- **Candle lighting** (licht benchen): always **18 minutes before shkiya** (sunset). This is when Shabbat/Yom Tov begins in practice.
-- **Shkiya** (sunset): the halachic start boundary used by this system. The restricted window begins at shkiya, not at candle lighting.
-- **Tzeis hakokhavim** (nightfall): calculated at 8.5 degrees below horizon.
-- **Resume time**: tzeis + configurable buffer (default 18 minutes) on Motzei Shabbat/Yom Tov.
+- **Candle lighting**: 18 minutes before shkiya (sunset). This is when Shabbat/Yom Tov begins in practice.
+- **Shkiya** (sunset): the halachic start boundary used by this system.
+- **Tzeit hakochavim** (nightfall): calculated at 8.5 degrees below horizon.
+- **Resume time**: tzeit + configurable buffer (default 18 minutes) on motzaei Shabbat/Yom Tov.
 
-Note: the system activates at shkiya rather than candle lighting because candle lighting is a preparation for Shabbat, while the halachic prohibition begins at shkiya. This means the system pauses 18 minutes *after* the household has already lit candles.
+Note: the system activates at shkiya rather than candle lighting because candle lighting is preparation, while the halachic prohibition begins at shkiya. The system pauses 18 minutes *after* the household has already lit candles.
 
 ## Phase 1: Pre-flight
 
@@ -24,9 +24,11 @@ Read `.nanoclaw/state.yaml`. If `shabbat-mode` is in `applied_skills`, skip to P
 
 ### Ask the user
 
-1. **Location** — latitude, longitude, and timezone for zmanim calculation. Default: Crown Heights, Brooklyn (40.669, -73.943, America/New_York).
-2. **Elevation** — meters above sea level. Default: 25m.
-3. **Tzeis buffer** — extra minutes after tzeis hakokhavim before resuming. Default: 18 minutes.
+1. **Location** — latitude, longitude, and timezone for zmanim calculation. No default — the user must provide their location.
+2. **Israel or Diaspora** — determines Yom Tov observance. Israel keeps 1-day Yom Tov, diaspora keeps 2 days.
+3. **Candle lighting notifications** — send a reminder to the user every erev Shabbat and erev Yom Tov with the candle lighting time? Default: yes.
+4. **Elevation** — meters above sea level. Default: 0m.
+5. **Tzeit buffer** — extra minutes after tzeit hakochavim before resuming. Default: 18 minutes.
 
 ## Phase 2: Apply Code Changes
 
@@ -47,14 +49,12 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-shabbat-mode
 ```
 
 This deterministically:
-- Adds `src/shabbat.ts` (runtime module with `isShabbatOrYomTov()` binary search)
-- Adds `src/shabbat.test.ts` (9 test cases for boundary conditions)
-- Adds `scripts/generate-zmanim.ts` (schedule generator using `@hebcal/core`)
+- Adds `src/shabbat.ts` (runtime module with `isShabbatOrYomTov()` binary search + candle lighting notifier)
+- Adds `src/shabbat.test.ts` (12 test cases for boundary conditions and candle lighting)
+- Adds `scripts/generate-zmanim.ts` (standalone schedule generator using `@hebcal/core`)
 - Three-way merges Shabbat guards into `src/index.ts` (message loop + processGroupMessages)
 - Three-way merges Shabbat guard into `src/task-scheduler.ts` (scheduler loop)
 - Three-way merges Shabbat guard into `src/ipc.ts` (IPC watcher)
-- Installs `@hebcal/core` as dev dependency
-- Adds `generate-zmanim` npm script
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
@@ -70,28 +70,33 @@ npm test
 npm run build
 ```
 
-All 9 shabbat tests must pass, full suite must pass, and build must be clean before proceeding.
+All 12 shabbat tests must pass, full suite must pass, and build must be clean before proceeding.
 
 ## Phase 3: Generate Schedule
 
-### Set location (if not default)
+### Install hebcal (one-time)
 
-If the user provided custom coordinates, set environment variables before generating:
+`@hebcal/core` is a standalone dependency for the generator script, not a project dependency:
 
 ```bash
-export SHABBAT_LAT=<lat>
-export SHABBAT_LNG=<lng>
-export SHABBAT_TIMEZONE=<tz>
-export SHABBAT_ELEVATION=<meters>
-export SHABBAT_BUFFER=<minutes>
-export SHABBAT_LOCATION="<name>"
+npm install --no-save @hebcal/core
 ```
 
 ### Generate the schedule
 
 ```bash
-npm run generate-zmanim
+SHABBAT_LAT=<lat> SHABBAT_LNG=<lng> SHABBAT_TIMEZONE=<tz> SHABBAT_IL=<true|false> npx tsx scripts/generate-zmanim.ts
 ```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SHABBAT_LAT` | Yes | Latitude |
+| `SHABBAT_LNG` | Yes | Longitude |
+| `SHABBAT_TIMEZONE` | Yes | IANA timezone (e.g. `America/New_York`, `Asia/Jerusalem`) |
+| `SHABBAT_IL` | No | `true` for Israel (1-day Yom Tov), default `false` (diaspora) |
+| `SHABBAT_LOCATION` | No | Cosmetic label for logs |
+| `SHABBAT_ELEVATION` | No | Meters above sea level (default 0) |
+| `SHABBAT_BUFFER` | No | Minutes after tzeit before resuming (default 18) |
 
 Expected output: `data/shabbat-schedule.json` with 300+ windows covering 5 years.
 
@@ -100,7 +105,7 @@ Expected output: `data/shabbat-schedule.json` with 300+ windows covering 5 years
 Verify the output:
 - Has 300+ windows
 - First upcoming Friday window starts at correct shkiya time for the location
-- Yom Tov events are present (Rosh Hashana, Pesach, Sukkos, Shavuos, Yom Kippur)
+- Yom Tov events are present (Rosh Hashana, Pesach, Sukkot, Shavuot, Yom Kippur)
 - Multi-day Yom Tov merged into single windows
 - Adjacent Shabbat+Yom Tov merged
 
@@ -142,32 +147,12 @@ After Shabbat: message loop picks up queued messages, scheduler fires due tasks,
 
 ### "No Shabbat schedule found, Shabbat mode disabled"
 
-The schedule file doesn't exist. Generate it:
-
-```bash
-npm run generate-zmanim
-```
-
-Then restart the service.
+The schedule file doesn't exist. Generate it (see Phase 3), then restart the service.
 
 ### "Shabbat schedule expires soon!"
 
-Regenerate the schedule:
-
-```bash
-npm run generate-zmanim
-```
-
-Then restart the service. The new schedule covers 5 years from the current date.
-
-### Messages not being processed after Shabbat
-
-Check that `data/shabbat-schedule.json` has correct tzeis times for your location. The buffer (default 18 min) is added after tzeis hakokhavim at 8.5 degrees below horizon.
+Regenerate the schedule (see Phase 3), then restart. The new schedule covers 5 years from the current date.
 
 ### Wrong times for location
 
-Regenerate with correct coordinates:
-
-```bash
-SHABBAT_LAT=<lat> SHABBAT_LNG=<lng> SHABBAT_TIMEZONE=<tz> npm run generate-zmanim
-```
+Regenerate with correct coordinates (see Phase 3).

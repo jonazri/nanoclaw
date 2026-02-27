@@ -41,7 +41,12 @@ import { shutdownGoogleAssistant } from './google-assistant.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
+import {
+  initShabbatSchedule,
+  isShabbatOrYomTov,
+  startCandleLightingNotifier,
+  stopCandleLightingNotifier,
+} from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
@@ -467,6 +472,41 @@ async function runAgent(
   }
 }
 
+async function sendPostShabbatSummary(): Promise<string[]> {
+  const pendingJids: string[] = [];
+
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+  if (!userJid) return pendingJids;
+
+  const channel = findChannel(channels, userJid);
+  if (!channel) return pendingJids;
+
+  const summaryLines: string[] = [];
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    if (pending.length > 0) {
+      summaryLines.push(`• ${group.name}: ${pending.length} messages`);
+      pendingJids.push(chatJid);
+    }
+  }
+
+  let text = 'Shavua Tov!';
+  if (summaryLines.length > 0) {
+    text += `\n\nHere's what happened over Shabbat:\n${summaryLines.join('\n')}\n\nCatching up now.`;
+  }
+
+  await channel.sendMessage(userJid, text);
+  logger.info(
+    { groupsWithActivity: summaryLines.length },
+    'Post-Shabbat summary sent',
+  );
+
+  return pendingJids;
+}
+
 async function startMessageLoop(): Promise<void> {
   if (messageLoopRunning) {
     logger.debug('Message loop already running, skipping duplicate start');
@@ -476,8 +516,21 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  let wasShabbat = isShabbatOrYomTov();
+
   while (true) {
     try {
+      const currentlyShabbat = isShabbatOrYomTov();
+
+      // Post-Shabbat catch-up: send summary and re-queue pending messages
+      if (wasShabbat && !currentlyShabbat) {
+        const pendingJids = await sendPostShabbatSummary();
+        for (const chatJid of pendingJids) {
+          queue.enqueueMessageCheck(chatJid);
+        }
+      }
+      wasShabbat = currentlyShabbat;
+
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -492,7 +545,7 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp = newTimestamp;
         saveState();
 
-        if (!isShabbatOrYomTov()) {
+        if (!currentlyShabbat) {
           // Deduplicate by group
           const messagesByGroup = new Map<string, NewMessage[]>();
           for (const msg of messages) {
@@ -669,6 +722,7 @@ async function main(): Promise<void> {
     await queue.shutdown(10000);
     await statusTracker.shutdown();
     for (const ch of channels) await ch.disconnect();
+    stopCandleLightingNotifier();
     stopTokenRefreshScheduler();
     shutdownGoogleAssistant();
     process.exit(0);
@@ -697,6 +751,16 @@ async function main(): Promise<void> {
   // Recover status tracker AFTER channels are connected, so recovery ❌ reactions
   // can actually be sent via the WhatsApp channel.
   await statusTracker.recover();
+
+  // Candle lighting reminders (erev Shabbat and erev Yom Tov)
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+  if (userJid) {
+    startCandleLightingNotifier((text) => whatsapp.sendMessage(userJid, text));
+  } else {
+    logger.warn('No main group registered — candle lighting notifier disabled');
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
