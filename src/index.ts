@@ -757,9 +757,7 @@ async function main(): Promise<void> {
     ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
   if (userJid) {
-    startCandleLightingNotifier((text) =>
-      whatsapp.sendMessage(userJid, text),
-    );
+    startCandleLightingNotifier((text) => whatsapp.sendMessage(userJid, text));
   } else {
     logger.warn('No main group registered — candle lighting notifier disabled');
   }
