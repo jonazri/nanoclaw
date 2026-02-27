@@ -38,10 +38,10 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler, stopTokenRefreshScheduler } from './oauth.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler, stopTokenRefreshScheduler } from './oauth.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -489,22 +489,25 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Graceful shutdown handlers
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'Shutdown signal received');
+    // Note: timer stop placed before queue.shutdown for skill-combination merge
+    // compatibility (google-home uses the gap after queue.shutdown). Functionally
+    // equivalent — clearing a setInterval is order-independent.
+    stopTokenRefreshScheduler();
+    await queue.shutdown(10000);
+    for (const ch of channels) await ch.disconnect();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   // Ensure token is fresh at startup so the first container doesn't hit an expired token
   await ensureTokenFresh();
 
   // Schedule proactive token refresh
   startTokenRefreshScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
-
-  // Graceful shutdown handlers
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
-    stopTokenRefreshScheduler();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {

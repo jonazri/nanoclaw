@@ -82,6 +82,15 @@ describe('getAvailableGroups', () => {
     expect(groups[0].jid).toBe('group@g.us');
   });
 
+  it('excludes Gmail threads from group list (Gmail threads are not groups)', () => {
+    storeChatMetadata('gmail:abc123', '2024-01-01T00:00:01.000Z', 'Email thread', 'gmail', false);
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:02.000Z', 'Group', 'whatsapp', true);
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('group@g.us');
+  });
+
   it('marks registered groups correctly', () => {
     storeChatMetadata(
       'reg@g.us',
@@ -176,14 +185,5 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
-  });
-
-  it('excludes Gmail threads from group list (Gmail threads are not groups)', () => {
-    storeChatMetadata('gmail:abc123', '2024-01-01T00:00:01.000Z', 'Email thread', 'gmail', false);
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:02.000Z', 'Group', 'whatsapp', true);
-
-    const groups = getAvailableGroups();
-    expect(groups).toHaveLength(1);
-    expect(groups[0].jid).toBe('group@g.us');
   });
 });

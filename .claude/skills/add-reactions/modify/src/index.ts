@@ -538,31 +538,16 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
-  statusTracker = new StatusTracker({
-    sendReaction: async (chatJid, messageKey, emoji) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel?.sendReaction) return;
-      await channel.sendReaction(chatJid, messageKey, emoji);
-    },
-    sendMessage: async (chatJid, text) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel) return;
-      await channel.sendMessage(chatJid, text);
-    },
-    isMainGroup: (chatJid) => {
-      const group = registeredGroups[chatJid];
-      return group?.folder === MAIN_GROUP_FOLDER;
-    },
-    isContainerAlive: (chatJid) => queue.isActive(chatJid),
-  });
-  // Note: recover() is called AFTER channels connect, so reactions can actually be sent
-
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
-    await statusTracker.shutdown();
     for (const ch of channels) await ch.disconnect();
+    // Note: statusTracker placed after ch.disconnect for skill-combination merge
+    // compatibility (google-home uses the gap before ch.disconnect). Pending
+    // reaction sends use Promise.allSettled so disconnected-channel failures are
+    // swallowed — minor degradation only during shutdown.
+    await statusTracker.shutdown();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -581,14 +566,29 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
+  // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => {
+      const group = registeredGroups[chatJid];
+      return group?.folder === MAIN_GROUP_FOLDER;
+    },
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+
   // Create and connect channels
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
   await whatsapp.connect();
-
-  // Recover status tracker AFTER channels are connected, so recovery ❌ reactions
-  // can actually be sent via the WhatsApp channel.
-  await statusTracker.recover();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -635,6 +635,9 @@ async function main(): Promise<void> {
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
     recoverPendingMessages,
   });
+  // Recover status tracker AFTER channels connect, so recovery reactions
+  // can actually be sent via the WhatsApp channel.
+  await statusTracker.recover();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
