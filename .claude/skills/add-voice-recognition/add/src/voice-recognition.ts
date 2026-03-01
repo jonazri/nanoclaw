@@ -261,6 +261,7 @@ export async function createVoiceProfile(
   name: string,
   embeddings: number[][],
 ): Promise<void> {
+  validateProfileName(name);
   if (embeddings.length === 0) {
     throw new Error('At least one embedding is required to create a profile');
   }
@@ -334,6 +335,7 @@ export async function updateVoiceProfile(
   name: string,
   newEmbeddings: number[][],
 ): Promise<void> {
+  validateProfileName(name);
   const existingProfile = await loadVoiceProfile(name);
   if (!existingProfile) {
     throw new Error(`Voice profile for ${name} not found`);

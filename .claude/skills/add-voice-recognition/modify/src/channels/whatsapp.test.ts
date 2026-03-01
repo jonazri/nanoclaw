@@ -8,6 +8,7 @@ vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
+  OWNER_NAME: 'Yaz',
 }));
 
 // Mock logger
@@ -34,6 +35,7 @@ vi.mock('../transcription.js', () => ({
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 
 // Mock voice recognition
 vi.mock('../voice-recognition.js', () => ({
@@ -41,7 +43,9 @@ vi.mock('../voice-recognition.js', () => ({
     speaker: null,
     similarity: 0,
     confidence: 'low',
+    embedding: [],
   }),
+  updateVoiceProfile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock fs
@@ -647,6 +651,72 @@ describe('WhatsAppChannel', () => {
         'registered@g.us',
         expect.objectContaining({ content: '[Voice Message - transcription failed]' }),
       );
+    });
+
+    it('auto-updates voice profile when owner is identified with high similarity', async () => {
+      vi.mocked(identifySpeaker).mockResolvedValueOnce({
+        speaker: 'Yaz',
+        similarity: 0.8,
+        confidence: 'high',
+        embedding: [0.1, 0.2, 0.3],
+      });
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-autoupdate',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
+          },
+          pushName: 'Yaz',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(vi.mocked(updateVoiceProfile)).toHaveBeenCalledWith('Yaz', [[0.1, 0.2, 0.3]]);
+    });
+
+    it('skips auto-update when similarity is below threshold', async () => {
+      vi.mocked(identifySpeaker).mockResolvedValueOnce({
+        speaker: 'Yaz',
+        similarity: 0.5,
+        confidence: 'low',
+        embedding: [0.1, 0.2, 0.3],
+      });
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      vi.mocked(updateVoiceProfile).mockClear();
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-noupdate',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
+          },
+          pushName: 'Yaz',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(vi.mocked(updateVoiceProfile)).not.toHaveBeenCalled();
     });
 
     it('uses sender JID when pushName is absent', async () => {

@@ -78,7 +78,7 @@ curl -s https://api.perplexity.ai/chat/completions \
     "messages": [
       {"role": "user", "content": "YOUR RESEARCH QUESTION"}
     ]
-  }' | python3 -c "import sys,json;r=json.load(sys.stdin);print(r['choices'][0]['message']['content']);print('\nCitations:',r.get('citations',[]))"
+  }' | python3 -c "import sys,json;r=json.load(sys.stdin);print(json.dumps({'answer':r['choices'][0]['message']['content'],'citations':r.get('citations',[])}))"
 }
 ```
 
