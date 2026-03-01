@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths: ['src/**', 'container/**']
 
+permissions:
+  contents: write
+
 jobs:
   bump-version:
     runs-on: ubuntu-latest

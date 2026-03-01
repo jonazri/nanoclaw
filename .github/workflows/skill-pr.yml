@@ -7,6 +7,10 @@ on:
       - '.claude/skills/**'
       - 'skills-engine/**'
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   # ── Job 1: Policy gate ────────────────────────────────────────────────
   # Block PRs that add NEW skill files while also modifying source code.
