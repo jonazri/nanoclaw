@@ -1,0 +1,34 @@
+skill: whatsapp-replies
+version: 1.0.0
+description: "See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context"
+core_version: 0.1.0
+adds:
+  - container/skills/whatsapp-replies/SKILL.md
+modifies:
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - rag-system/src/ingestion.ts
+  - src/channels/whatsapp.test.ts
+  - src/channels/whatsapp.ts
+  - src/db.test.ts
+  - src/db.ts
+  - src/formatting.test.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/router.ts
+  - src/types.ts
+modify_base:
+  container/agent-runner/src/ipc-mcp-stdio.ts: _accumulated
+  rag-system/src/ingestion.ts: _accumulated
+  src/channels/whatsapp.test.ts: _accumulated
+  src/channels/whatsapp.ts: _accumulated
+  src/db.test.ts: _accumulated
+  src/db.ts: _accumulated
+  src/formatting.test.ts: _accumulated
+  src/index.ts: _accumulated
+  src/ipc.ts: _accumulated
+  src/router.ts: _accumulated
+  src/types.ts: _accumulated
+conflicts: []
+depends:
+  - whatsapp-search
+test: npx tsc --noEmit
