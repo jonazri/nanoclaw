@@ -6,6 +6,8 @@ adds:
   - container/skills/perplexity-research/SKILL.md
 modifies:
   - src/container-runner.ts
+modify_base:
+  src/container-runner.ts: _accumulated
 conflicts: []
 incompatible_with: []
 depends: []

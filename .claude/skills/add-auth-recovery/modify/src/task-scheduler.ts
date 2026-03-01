@@ -29,7 +29,6 @@ import {
   ensureTokenFresh,
   refreshOAuthToken,
 } from './oauth.js';
-import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /** Compute the next run time for a recurring task. Returns null for one-shot tasks. */
@@ -320,15 +319,6 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
-
-      if (isShabbatOrYomTov()) {
-        if (dueTasks.length > 0) {
-          logger.debug({ count: dueTasks.length }, 'Shabbat/Yom Tov active, skipping due tasks');
-        }
-        setTimeout(loop, SCHEDULER_POLL_INTERVAL);
-        return;
-      }
-
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }

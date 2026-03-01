@@ -24,7 +24,6 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { AUTH_ERROR_PATTERN } from './oauth.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -205,7 +204,6 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -258,7 +256,6 @@ function readSecrets(): Record<string, string> {
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'OPENAI_API_KEY',
-    'PERPLEXITY_API_KEY',
   ]);
 }
 
@@ -280,9 +277,6 @@ function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
-
-  // Allow containers to reach host services (e.g. RAG API)
-  args.push('--add-host', 'host.docker.internal:host-gateway');
 
   for (const mount of mounts) {
     if (mount.readonly) {
@@ -428,33 +422,6 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
-
-            // Streaming failsafe: detect auth errors immediately
-            // In streaming mode the container never exits on auth errors —
-            // the SDK retries internally. Catch it here and abort early.
-            // Check parsed.error (actual SDK errors), NOT parsed.result
-            // (agent conversation text which may naturally discuss auth topics).
-            if (parsed.error && AUTH_ERROR_PATTERN.test(parsed.error)) {
-              logger.warn(
-                { group: group.name, containerName },
-                'Auth error detected in streaming output, aborting container',
-              );
-              // Use `docker stop` to properly stop the container.
-              // container.kill('SIGTERM') only kills the docker CLI client,
-              // leaving the container running as a zombie.
-              exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-                if (err) container.kill('SIGKILL');
-              });
-              clearTimeout(timeout);
-              safeResolve({
-                status: 'error',
-                result: null,
-                error: parsed.error,
-                newSessionId,
-              });
-              return;
-            }
-
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));

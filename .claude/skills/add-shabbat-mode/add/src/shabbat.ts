@@ -14,6 +14,7 @@ interface ShabbatSchedule {
   location: string;
   coordinates: number[];
   elevation: number;
+  timezone?: string;
   tzeisBufferMinutes: number;
   generatedAt: string;
   expiresAt: string;
@@ -49,7 +50,8 @@ export function initShabbatSchedule(): void {
     );
 
     const expiresAt = new Date(parsed.expiresAt).getTime();
-    const warningThreshold = Date.now() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
+    const warningThreshold =
+      Date.now() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
     if (expiresAt < warningThreshold) {
       logger.warn(
         { expiresAt: parsed.expiresAt },
@@ -88,7 +90,96 @@ export function isShabbatOrYomTov(): boolean {
   return now < windowEnds[candidate];
 }
 
+const CANDLE_LIGHTING_MINUTES = 18;
+const NOTIFY_CHECK_MS = 30 * 60 * 1000;
+const NOTIFY_HORIZON_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Return the next upcoming candle lighting time (18 min before shkiya).
+ */
+export function getNextCandleLighting(): {
+  time: Date;
+  label: string;
+} | null {
+  if (!schedule) return null;
+  const now = Date.now();
+  const offset = CANDLE_LIGHTING_MINUTES * 60 * 1000;
+
+  // Binary search for the first window whose candle lighting is in the future
+  let lo = 0;
+  let hi = windowStarts.length - 1;
+  let candidate = -1;
+
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const candleLighting = windowStarts[mid] - offset;
+    if (candleLighting > now) {
+      candidate = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  if (candidate === -1) return null;
+  return {
+    time: new Date(windowStarts[candidate] - offset),
+    label: schedule.windows[candidate].label,
+  };
+}
+
+let notifierTimer: ReturnType<typeof setInterval> | null = null;
+let lastNotifiedStart = 0;
+
+/**
+ * Send a candle lighting reminder every erev Shabbat and erev Yom Tov.
+ * Fires once per window, ~6 hours before candle lighting.
+ */
+export function startCandleLightingNotifier(
+  notify: (text: string) => void,
+): void {
+  if (!schedule) return;
+
+  const check = () => {
+    const next = getNextCandleLighting();
+    if (!next) return;
+
+    const windowStart =
+      next.time.getTime() + CANDLE_LIGHTING_MINUTES * 60 * 1000;
+    if (windowStart === lastNotifiedStart) return;
+
+    const timeUntil = next.time.getTime() - Date.now();
+    if (timeUntil > 0 && timeUntil <= NOTIFY_HORIZON_MS) {
+      lastNotifiedStart = windowStart;
+      const timeStr = formatTime(next.time);
+      const label = next.label.includes('Shabbat')
+        ? 'Shabbat Shalom! '
+        : `${next.label} — `;
+      notify(`${label}Candle lighting at ${timeStr}`);
+    }
+  };
+
+  notifierTimer = setInterval(check, NOTIFY_CHECK_MS);
+  check();
+}
+
+export function stopCandleLightingNotifier(): void {
+  if (notifierTimer) {
+    clearInterval(notifierTimer);
+    notifierTimer = null;
+  }
+}
+
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(schedule?.timezone ? { timeZone: schedule.timezone } : {}),
+  });
+}
+
 /** @internal — for tests only */
 export function _loadScheduleForTest(s: ShabbatSchedule): void {
   loadSchedule(s);
+  lastNotifiedStart = 0;
 }
