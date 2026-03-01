@@ -13,6 +13,8 @@ Commands:
     → {"status": "ok", "model": "pyannote/embedding"}
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import os

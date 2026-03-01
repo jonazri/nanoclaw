@@ -19,4 +19,4 @@ conflicts: []
 depends:
   - voice-transcription-elevenlabs
 tested_with: []
-test: "npx tsc --noEmit"
+test: "npx tsc --noEmit && npx vitest run src/channels/whatsapp.test.ts"
