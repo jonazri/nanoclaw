@@ -7,9 +7,9 @@ adds:
   - container/skills/reactions/SKILL.md
   - src/status-tracker.ts
   - src/status-tracker.test.ts
-  - src/db.test.ts
 modifies:
   - src/db.ts
+  - src/db.test.ts
   - src/channels/whatsapp.ts
   - src/types.ts
   - src/ipc.ts

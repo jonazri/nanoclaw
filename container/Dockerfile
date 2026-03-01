@@ -23,7 +23,6 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
-    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -45,15 +44,11 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
-# Install google-home CLI wrapper
-COPY skills/google-home/google-home /usr/local/bin/google-home
-RUN chmod +x /usr/local/bin/google-home
-
 # Build TypeScript
 RUN npm run build
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/responses
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it

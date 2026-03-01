@@ -4,7 +4,6 @@ import fs from 'fs';
 
 import {
   ASSISTANT_NAME,
-  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
@@ -22,32 +21,10 @@ import {
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
-
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  AUTH_ERROR_PATTERN,
-  ensureTokenFresh,
-  refreshOAuthToken,
-} from './oauth.js';
-import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
-
-/** Compute the next run time for a recurring task. Returns null for one-shot tasks. */
-function computeNextRun(task: ScheduledTask): string | null {
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    return interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    return new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
-  return null;
-}
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -60,19 +37,6 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
-}
-
-async function notifyMain(
-  deps: SchedulerDependencies,
-  text: string,
-): Promise<void> {
-  const groups = deps.registeredGroups();
-  const mainJid = Object.entries(groups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
-  )?.[0];
-  if (mainJid) {
-    await deps.sendMessage(mainJid, text);
-  }
 }
 
 async function runTask(
@@ -169,9 +133,6 @@ async function runTask(
   };
 
   try {
-    // Pre-flight: refresh token if expired or expiring soon
-    await ensureTokenFresh();
-
     const output = await runContainerAgent(
       group,
       {
@@ -188,14 +149,7 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Safety: never send scheduled task results to a group chat
-          if (task.chat_jid.endsWith('@g.us')) {
-            logger.error(
-              { taskId: task.id, chatJid: task.chat_jid },
-              'Blocked scheduled task result from being sent to group chat',
-            );
-            return;
-          }
+          // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
@@ -211,81 +165,7 @@ async function runTask(
     if (closeTimer) clearTimeout(closeTimer);
 
     if (output.status === 'error') {
-      const outputError = output.error || 'Unknown error';
-
-      if (AUTH_ERROR_PATTERN.test(outputError)) {
-        logger.warn(
-          { taskId: task.id },
-          'Auth error in scheduled task, refreshing token and retrying',
-        );
-        await notifyMain(
-          deps,
-          '[system] Auth token expired — refreshing and retrying.',
-        );
-        const refreshed = await refreshOAuthToken();
-        if (refreshed) {
-          const retry = await runContainerAgent(
-            group,
-            {
-              prompt: task.prompt,
-              sessionId,
-              groupFolder: task.group_folder,
-              chatJid: task.chat_jid,
-              isMain,
-              isScheduledTask: true,
-            },
-            (proc, containerName) =>
-              deps.onProcess(
-                task.chat_jid,
-                proc,
-                containerName,
-                task.group_folder,
-              ),
-            async (streamedOutput: ContainerOutput) => {
-              if (streamedOutput.result) {
-                result = streamedOutput.result;
-                // Safety: never send scheduled task results to a group chat
-                if (task.chat_jid.endsWith('@g.us')) {
-                  logger.error(
-                    { taskId: task.id, chatJid: task.chat_jid },
-                    'Blocked scheduled task result from being sent to group chat',
-                  );
-                  return;
-                }
-                await deps.sendMessage(task.chat_jid, streamedOutput.result);
-              }
-              if (streamedOutput.status === 'error') {
-                error = streamedOutput.error || 'Unknown error';
-              }
-            },
-          );
-          if (retry.status === 'error') {
-            error = retry.error || 'Unknown error after retry';
-            logger.error(
-              { taskId: task.id, error },
-              'Scheduled task failed after token refresh',
-            );
-            await notifyMain(
-              deps,
-              '[system] Token refresh failed. You may need to run "claude login".',
-            );
-          } else {
-            if (retry.result) result = retry.result;
-            await notifyMain(
-              deps,
-              '[system] Token refreshed. Services restored.',
-            );
-          }
-        } else {
-          error = outputError;
-          await notifyMain(
-            deps,
-            '[system] Token refresh failed. You may need to run "claude login".',
-          );
-        }
-      } else {
-        error = outputError;
-      }
+      error = output.error || 'Unknown error';
     } else if (output.result) {
       // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
@@ -312,9 +192,18 @@ async function runTask(
     error,
   });
 
-  // next_run was already advanced before enqueuing (see startSchedulerLoop).
-  // Recompute to pass through for the status logic ('once' tasks → completed).
-  const nextRun = computeNextRun(task);
+  let nextRun: string | null = null;
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    nextRun = interval.next().toISOString();
+  } else if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    nextRun = new Date(Date.now() + ms).toISOString();
+  }
+  // 'once' tasks have no next run
+
   const resultSummary = error
     ? `Error: ${error}`
     : result
@@ -336,18 +225,6 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
-
-      if (isShabbatOrYomTov()) {
-        if (dueTasks.length > 0) {
-          logger.debug(
-            { count: dueTasks.length },
-            'Shabbat/Yom Tov active, skipping due tasks',
-          );
-        }
-        setTimeout(loop, SCHEDULER_POLL_INTERVAL);
-        return;
-      }
-
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
@@ -358,13 +235,6 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
-
-        // Advance next_run BEFORE enqueuing to prevent the next poll from
-        // re-discovering this task while it's still running. Without this,
-        // a long-running task gets enqueued again on the next 60s poll cycle
-        // and executes a second time once the first run finishes.
-        const nextRun = computeNextRun(currentTask);
-        updateTask(currentTask.id, { next_run: nextRun });
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),
