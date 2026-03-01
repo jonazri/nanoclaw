@@ -43,7 +43,7 @@ curl -s https://api.perplexity.ai/chat/completions \
       {"role": "system", "content": "Be thorough and cite sources."},
       {"role": "user", "content": "YOUR RESEARCH QUESTION"}
     ]
-  }' | jq -r '.choices[0].message.content'
+  }' | python3 -c "import sys,json;print(json.load(sys.stdin)['choices'][0]['message']['content'])"
 }
 ```
 
@@ -62,7 +62,7 @@ curl -s https://api.perplexity.ai/chat/completions \
       {"role": "system", "content": "Produce a comprehensive research report with citations."},
       {"role": "user", "content": "YOUR RESEARCH QUESTION"}
     ]
-  }' | jq -r '.choices[0].message.content'
+  }' | python3 -c "import sys,json;print(json.load(sys.stdin)['choices'][0]['message']['content'])"
 }
 ```
 
@@ -78,7 +78,7 @@ curl -s https://api.perplexity.ai/chat/completions \
     "messages": [
       {"role": "user", "content": "YOUR RESEARCH QUESTION"}
     ]
-  }' | jq '{answer: .choices[0].message.content, citations: .citations}'
+  }' | python3 -c "import sys,json;r=json.load(sys.stdin);print(r['choices'][0]['message']['content']);print('\nCitations:',r.get('citations',[]))"
 }
 ```
 

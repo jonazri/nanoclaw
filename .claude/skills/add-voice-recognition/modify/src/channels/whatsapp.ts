@@ -21,7 +21,7 @@ import {
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { identifySpeaker } from '../voice-recognition.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
@@ -264,12 +264,7 @@ export class WhatsAppChannel implements Channel {
                       result.similarity >= 0.65
                     ) {
                       try {
-                        const { extractVoiceEmbedding, updateVoiceProfile } =
-                          await import('../voice-recognition.js');
-                        const embedding = await extractVoiceEmbedding(
-                          audioBuffer!,
-                        );
-                        await updateVoiceProfile(OWNER_NAME, [embedding]);
+                        await updateVoiceProfile(OWNER_NAME, [result.embedding]);
                         logger.info(
                           { similarity: result.similarity },
                           'Auto-updated voice profile with new sample',

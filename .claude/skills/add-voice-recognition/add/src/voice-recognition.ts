@@ -18,10 +18,11 @@ export interface SpeakerIdentification {
   speaker: string | null;
   similarity: number;
   confidence: 'high' | 'medium' | 'low';
+  embedding: number[];
 }
 
 const PROFILE_DIR = path.join(process.cwd(), 'data', 'voice-profiles');
-const VENV_PYTHON = path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
+const VENV_PYTHON = process.env.VOICE_PYTHON_PATH ?? path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
 const PYTHON_SERVICE = path.join(process.cwd(), 'scripts', 'voice-recognition-service.py');
 const SIMILARITY_THRESHOLD_HIGH = 0.7;
 const SIMILARITY_THRESHOLD_MEDIUM = 0.55;
@@ -61,10 +62,19 @@ function averageEmbeddings(embeddings: number[][]): number[] {
   return avg;
 }
 
+// ── Profile name validation ──────────────────────────────────────
+
+function validateProfileName(name: string): void {
+  if (!/^[A-Za-z0-9 _-]+$/.test(name)) {
+    throw new Error(
+      `Invalid profile name "${name}" — use only letters, numbers, spaces, hyphens, and underscores`,
+    );
+  }
+}
+
 // ── Python daemon management ──────────────────────────────────────
 
 let daemon: ChildProcess | null = null;
-let daemonRL: readline.Interface | null = null;
 let pendingResolve: ((value: any) => void) | null = null;
 let pendingReject: ((reason: any) => void) | null = null;
 let daemonReady = false;
@@ -76,7 +86,6 @@ async function ensureDaemon(): Promise<void> {
   if (daemon) {
     daemon.kill();
     daemon = null;
-    daemonRL = null;
     daemonReady = false;
   }
 
@@ -107,7 +116,6 @@ async function ensureDaemon(): Promise<void> {
     proc.on('exit', (code) => {
       logger.info({ code }, 'Voice recognition daemon exited');
       daemon = null;
-      daemonRL = null;
       daemonReady = false;
       if (pendingReject) {
         pendingReject(new Error(`Daemon exited with code ${code}`));
@@ -144,7 +152,6 @@ async function ensureDaemon(): Promise<void> {
     });
 
     daemon = proc;
-    daemonRL = rl;
 
     // Timeout if model doesn't load within 120s
     setTimeout(() => {
@@ -156,28 +163,34 @@ async function ensureDaemon(): Promise<void> {
   });
 }
 
+// Serialize all commands — the daemon handles one request at a time
+// and uses a single pendingResolve/pendingReject slot.
+let commandInFlight: Promise<unknown> = Promise.resolve();
+
 async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
-  await ensureDaemon();
+  return (commandInFlight = commandInFlight.catch(() => {}).then(async () => {
+    await ensureDaemon();
 
-  if (!daemon || !daemon.stdin) {
-    throw new Error('Voice recognition daemon not available');
-  }
+    if (!daemon || !daemon.stdin) {
+      throw new Error('Voice recognition daemon not available');
+    }
 
-  return new Promise((resolve, reject) => {
-    pendingResolve = resolve;
-    pendingReject = reject;
+    return new Promise<any>((resolve, reject) => {
+      pendingResolve = resolve;
+      pendingReject = reject;
 
-    daemon!.stdin!.write(JSON.stringify(cmd) + '\n');
+      daemon!.stdin!.write(JSON.stringify(cmd) + '\n');
 
-    // Timeout per command (60s for extraction)
-    setTimeout(() => {
-      if (pendingReject) {
-        pendingReject(new Error('Command timed out'));
-        pendingResolve = null;
-        pendingReject = null;
-      }
-    }, 60_000);
-  });
+      // Timeout per command (60s for extraction)
+      setTimeout(() => {
+        if (pendingReject) {
+          pendingReject(new Error('Command timed out'));
+          pendingResolve = null;
+          pendingReject = null;
+        }
+      }, 60_000);
+    });
+  }));
 }
 
 // ── Public API ────────────────────────────────────────────────────
@@ -272,12 +285,12 @@ export async function createVoiceProfile(
 export async function identifySpeaker(
   audioBuffer: Buffer,
 ): Promise<SpeakerIdentification> {
-  const embedding = await extractVoiceEmbedding(audioBuffer);
-
   const profileNames = await listVoiceProfiles();
   if (profileNames.length === 0) {
-    return { speaker: null, similarity: 0, confidence: 'low' };
+    return { speaker: null, similarity: 0, confidence: 'low', embedding: [] };
   }
+
+  const embedding = await extractVoiceEmbedding(audioBuffer);
 
   let bestMatch: { name: string; similarity: number } | null = null;
 
@@ -293,7 +306,7 @@ export async function identifySpeaker(
   }
 
   if (!bestMatch) {
-    return { speaker: null, similarity: 0, confidence: 'low' };
+    return { speaker: null, similarity: 0, confidence: 'low', embedding };
   }
 
   let confidence: 'high' | 'medium' | 'low';
@@ -309,6 +322,7 @@ export async function identifySpeaker(
     speaker: bestMatch.similarity >= SIMILARITY_THRESHOLD_MEDIUM ? bestMatch.name : null,
     similarity: bestMatch.similarity,
     confidence,
+    embedding,
   };
 }
 
@@ -345,7 +359,6 @@ export function shutdownVoiceRecognition(): void {
   if (daemon && !daemon.killed) {
     daemon.kill();
     daemon = null;
-    daemonRL = null;
     daemonReady = false;
   }
 }

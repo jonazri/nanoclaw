@@ -18,6 +18,7 @@ const LOCATION_NAME = process.env.SHABBAT_LOCATION || 'Crown Heights, Brooklyn';
 const TIMEZONE = process.env.SHABBAT_TIMEZONE || 'America/New_York';
 const YEARS_TO_GENERATE = parseInt(process.env.SHABBAT_YEARS || '5', 10);
 const TZEIS_BUFFER_MINUTES = parseInt(process.env.SHABBAT_BUFFER || '18', 10);
+const ISRAEL = process.env.SHABBAT_IL === 'true';
 const OUTPUT_PATH = path.resolve(process.cwd(), 'data', 'shabbat-schedule.json');
 
 interface ShabbatWindow {
@@ -66,7 +67,7 @@ function generateWindows(startYear: number, endYear: number): ShabbatWindow[] {
     const events = HebrewCalendar.calendar({
       year,
       isHebrewYear: false,
-      il: false,
+      il: ISRAEL,
       mask: flags.CHAG,
     });
 
