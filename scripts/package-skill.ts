@@ -48,8 +48,8 @@ function walkDir(dir: string, root: string): string[] {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      // Skip node_modules, .git, and hidden dirs inside the scanned trees
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      // Skip node_modules, .git, and hidden directories
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) continue;
       results.push(...walkDir(fullPath, root));
     } else if (entry.isFile()) {
       results.push(path.relative(root, fullPath));
@@ -105,6 +105,13 @@ for (const relPath of allFiles) {
     const currentHash = computeFileHash(absPath);
     const baseHash = computeFileHash(basePath);
     if (currentHash !== baseHash) {
+      modifies.push(relPath);
+    }
+  } else if (existsInApplied) {
+    // File was added by an applied skill — check if user changed it
+    const currentHash = computeFileHash(absPath);
+    const appliedHash = knownHashes.get(relPath);
+    if (appliedHash && currentHash !== appliedHash) {
       modifies.push(relPath);
     }
   }
