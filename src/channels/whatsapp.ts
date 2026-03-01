@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 
 import makeWASocket, {
@@ -14,16 +15,50 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  OWNER_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
   RegisteredGroup,
+  QuotedMessageKey,
 } from '../types.js';
+
+const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
+
+/**
+ * Extract text content from a Baileys quoted message proto.
+ */
+function extractQuotedText(
+  quotedMessage: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!quotedMessage) return undefined;
+  const q = quotedMessage as {
+    conversation?: string;
+    extendedTextMessage?: { text?: string };
+    imageMessage?: { caption?: string };
+    videoMessage?: { caption?: string };
+  };
+  return (
+    q.conversation ||
+    q.extendedTextMessage?.text ||
+    q.imageMessage?.caption ||
+    q.videoMessage?.caption ||
+    undefined
+  );
+}
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -42,6 +77,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempt = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -108,21 +144,27 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          const delay = Math.min(
+            1000 * Math.pow(2, this.reconnectAttempt),
+            60000,
+          );
+          this.reconnectAttempt++;
+          logger.info(
+            { delay, attempt: this.reconnectAttempt },
+            'Reconnecting...',
+          );
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'Reconnect failed');
+            });
+          }, delay);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempt = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -202,8 +244,22 @@ export class WhatsAppChannel implements Channel {
             msg.message?.videoMessage?.caption ||
             '';
 
+          // Extract reply/quote context if present
+          const contextInfo =
+            msg.message?.extendedTextMessage?.contextInfo ||
+            msg.message?.imageMessage?.contextInfo ||
+            msg.message?.videoMessage?.contextInfo ||
+            null;
+
+          const repliedToId = contextInfo?.stanzaId || undefined;
+          const repliedToSender = contextInfo?.participant || undefined;
+          const repliedToContent = extractQuotedText(
+            contextInfo?.quotedMessage as Record<string, unknown> | null | undefined,
+          );
+
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          // but allow voice messages through for transcription
+          if (!content && !isVoiceMessage(msg)) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -217,16 +273,139 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
+          // Transcribe voice messages and identify speaker
+          let finalContent = content;
+          if (isVoiceMessage(msg)) {
+            try {
+              const { transcript, audioBuffer } = await transcribeAudioMessage(
+                msg,
+                this.sock,
+              );
+
+              // Save raw audio for enrollment/debugging
+              if (audioBuffer) {
+                try {
+                  await fsPromises.mkdir(VOICE_AUDIO_DIR, { recursive: true });
+                  const audioPath = path.join(
+                    VOICE_AUDIO_DIR,
+                    `${Date.now()}.ogg`,
+                  );
+                  await fsPromises.writeFile(audioPath, audioBuffer);
+                  logger.debug({ audioPath }, 'Saved voice audio');
+                } catch (saveErr) {
+                  logger.warn({ err: saveErr }, 'Failed to save voice audio');
+                }
+              }
+
+              // Identify speaker
+              let speakerTag = '';
+              if (audioBuffer) {
+                try {
+                  const result = await identifySpeaker(audioBuffer);
+                  if (result.speaker) {
+                    const pct = Math.round(result.similarity * 100);
+                    speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+
+                    // Continuous learning: update profile with high-confidence samples
+                    if (
+                      OWNER_NAME &&
+                      result.speaker === OWNER_NAME &&
+                      result.similarity >= 0.65
+                    ) {
+                      try {
+                        const { extractVoiceEmbedding, updateVoiceProfile } =
+                          await import('../voice-recognition.js');
+                        const embedding = await extractVoiceEmbedding(
+                          audioBuffer!,
+                        );
+                        await updateVoiceProfile(OWNER_NAME, [embedding]);
+                        logger.info(
+                          { similarity: result.similarity },
+                          'Auto-updated voice profile with new sample',
+                        );
+                      } catch (learnErr) {
+                        logger.warn(
+                          { err: learnErr },
+                          'Failed to auto-update voice profile',
+                        );
+                      }
+                    }
+                  } else {
+                    speakerTag = ' [Unknown speaker]';
+                  }
+                } catch (idErr) {
+                  logger.warn({ err: idErr }, 'Speaker identification failed');
+                }
+              }
+
+              if (transcript) {
+                finalContent = `[Voice: ${transcript}]${speakerTag}`;
+                logger.info(
+                  { chatJid, length: transcript.length, speakerTag },
+                  'Transcribed voice message',
+                );
+              } else {
+                finalContent = '[Voice Message - transcription unavailable]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription error');
+              finalContent = '[Voice Message - transcription failed]';
+            }
+          }
+
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content,
+            content: finalContent,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            replied_to_id: repliedToId,
+            replied_to_sender: repliedToSender,
+            replied_to_content: repliedToContent,
           });
+        }
+      }
+    });
+
+    // Listen for message reactions
+    this.sock.ev.on('messages.reaction', async (reactions) => {
+      for (const { key, reaction } of reactions) {
+        try {
+          const messageId = key.id;
+          if (!messageId) continue;
+          const rawChatJid = key.remoteJid;
+          if (!rawChatJid || rawChatJid === 'status@broadcast') continue;
+          const chatJid = await this.translateJid(rawChatJid);
+          const groups = this.opts.registeredGroups();
+          if (!groups[chatJid]) continue;
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
+          const emoji = reaction.text || '';
+          const timestamp = reaction.senderTimestampMs
+            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+            : new Date().toISOString();
+          storeReaction({
+            message_id: messageId,
+            message_chat_jid: chatJid,
+            reactor_jid: reactorJid,
+            reactor_name: reactorJid.split('@')[0],
+            emoji,
+            timestamp,
+          });
+          logger.info(
+            {
+              chatJid,
+              messageId: messageId.slice(0, 10) + '...',
+              reactor: reactorJid.split('@')[0],
+              emoji: emoji || '(removed)',
+            },
+            emoji ? 'Reaction added' : 'Reaction removed',
+          );
+        } catch (err) {
+          logger.error({ err }, 'Failed to process reaction');
         }
       }
     });
@@ -260,6 +439,51 @@ export class WhatsAppChannel implements Channel {
         'Failed to send, message queued',
       );
     }
+  }
+
+  async sendReaction(
+    chatJid: string,
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
+      throw new Error('Not connected to WhatsApp');
+    }
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: { text: emoji, key: messageKey },
+      });
+      logger.info(
+        {
+          chatJid,
+          messageId: messageKey.id?.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed',
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
+    const latest = getLatestMessage(chatJid);
+    if (!latest) {
+      throw new Error(`No messages found for chat ${chatJid}`);
+    }
+    const messageKey = {
+      id: latest.id,
+      remoteJid: chatJid,
+      fromMe: latest.fromMe,
+    };
+    await this.sendReaction(chatJid, messageKey, emoji);
   }
 
   isConnected(): boolean {

@@ -23,8 +23,33 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
+  getLatestMessage: vi.fn(() => undefined),
+  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
+  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
+}));
+
+// Mock transcription
+vi.mock('../transcription.js', () => ({
+  isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
+  transcribeAudioMessage: vi
+    .fn()
+    .mockResolvedValue({
+      transcript: 'Hello this is a voice message',
+      audioBuffer: Buffer.from('fake-audio'),
+    }),
+}));
+
+import { transcribeAudioMessage } from '../transcription.js';
+
+// Mock voice recognition
+vi.mock('../voice-recognition.js', () => ({
+  identifySpeaker: vi.fn().mockResolvedValue({
+    speaker: null,
+    similarity: 0,
+    confidence: 'low',
+  }),
 }));
 
 // Mock fs
@@ -39,6 +64,14 @@ vi.mock('fs', async () => {
     },
   };
 });
+
+// Mock fs/promises
+vi.mock('fs/promises', () => ({
+  default: {
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 // Mock child_process (used for osascript notification)
 vi.mock('child_process', () => ({
@@ -532,7 +565,7 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
+    it('transcribes voice messages', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -554,8 +587,186 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Skipped — no text content to process
-      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(transcribeAudioMessage).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Voice: Hello this is a voice message] [Unknown speaker]',
+        }),
+      );
+    });
+
+    it('falls back when transcription returns null', async () => {
+      vi.mocked(transcribeAudioMessage).mockResolvedValueOnce({
+        transcript: null,
+        audioBuffer: null,
+      });
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-8b',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
+          },
+          pushName: 'Frank',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Voice Message - transcription unavailable]',
+        }),
+      );
+    });
+
+    it('falls back when transcription throws', async () => {
+      vi.mocked(transcribeAudioMessage).mockRejectedValueOnce(
+        new Error('API error'),
+      );
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-8c',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
+          },
+          pushName: 'Frank',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Voice Message - transcription failed]',
+        }),
+      );
+    });
+
+    it('extracts reply context from extendedTextMessage.contextInfo', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'reply-msg-1',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'Great point!',
+              contextInfo: {
+                stanzaId: 'original-msg-id',
+                participant: 'bob@s.whatsapp.net',
+                quotedMessage: { conversation: 'The original message' },
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: 'Great point!',
+          replied_to_id: 'original-msg-id',
+          replied_to_sender: 'bob@s.whatsapp.net',
+          replied_to_content: 'The original message',
+        }),
+      );
+    });
+
+    it('passes undefined reply fields when no contextInfo present', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'plain-msg-1',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: { conversation: 'Just a plain message' },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      const call = vi.mocked(opts.onMessage).mock.calls[0][1];
+      expect(call.replied_to_id).toBeUndefined();
+      expect(call.replied_to_sender).toBeUndefined();
+      expect(call.replied_to_content).toBeUndefined();
+    });
+
+    it('extracts reply context from imageMessage.contextInfo', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'img-reply-1',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            imageMessage: {
+              caption: 'Look at this',
+              contextInfo: {
+                stanzaId: 'quoted-id',
+                participant: 'carol@s.whatsapp.net',
+                quotedMessage: { conversation: 'Quoted text' },
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          replied_to_id: 'quoted-id',
+          replied_to_sender: 'carol@s.whatsapp.net',
+        }),
+      );
     });
 
     it('uses sender JID when pushName is absent', async () => {
