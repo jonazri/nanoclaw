@@ -87,18 +87,6 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: reaction support
-  sendReaction?(
-    chatJid: string,
-    messageKey: {
-      id: string;
-      remoteJid: string;
-      fromMe?: boolean;
-      participant?: string;
-    },
-    emoji: string,
-  ): Promise<void>;
-  reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

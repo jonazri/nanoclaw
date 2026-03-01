@@ -23,29 +23,8 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
-  getLatestMessage: vi.fn(() => undefined),
-  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
-  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
-}));
-
-// Mock transcription
-vi.mock('../transcription.js', () => ({
-  isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
-  transcribeAudioMessage: vi.fn().mockResolvedValue({
-    transcript: 'Hello this is a voice message',
-    audioBuffer: Buffer.from('fake-audio'),
-  }),
-}));
-
-// Mock voice recognition
-vi.mock('../voice-recognition.js', () => ({
-  identifySpeaker: vi.fn().mockResolvedValue({
-    speaker: null,
-    similarity: 0,
-    confidence: 'low',
-  }),
 }));
 
 // Mock fs
@@ -60,14 +39,6 @@ vi.mock('fs', async () => {
     },
   };
 });
-
-// Mock fs/promises
-vi.mock('fs/promises', () => ({
-  default: {
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-  },
-}));
 
 // Mock child_process (used for osascript notification)
 vi.mock('child_process', () => ({
@@ -129,7 +100,6 @@ vi.mock('@whiskeysockets/baileys', () => {
 
 import { WhatsAppChannel, WhatsAppChannelOpts } from './whatsapp.js';
 import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
-import { transcribeAudioMessage } from '../transcription.js';
 
 // --- Test helpers ---
 
@@ -213,7 +183,6 @@ describe('WhatsAppChannel', () => {
       vi.mocked(fetchLatestWaWebVersion).mockRejectedValueOnce(
         new Error('network error'),
       );
-      const { logger } = await import('../logger.js');
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -221,10 +190,6 @@ describe('WhatsAppChannel', () => {
 
       // Should still connect successfully despite fetch failure
       expect(channel.isConnected()).toBe(true);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ err: expect.any(Error) }),
-        'Failed to fetch latest WA Web version, using default',
-      );
     });
   });
 
@@ -567,7 +532,7 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('transcribes voice messages', async () => {
+    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -589,85 +554,8 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      expect(transcribeAudioMessage).toHaveBeenCalled();
-      expect(opts.onMessage).toHaveBeenCalledTimes(1);
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: '[Voice: Hello this is a voice message] [Unknown speaker]',
-        }),
-      );
-    });
-
-    it('falls back when transcription returns null', async () => {
-      vi.mocked(transcribeAudioMessage).mockResolvedValueOnce({
-        transcript: null,
-        audioBuffer: null,
-      });
-
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-
-      await connectChannel(channel);
-
-      await triggerMessages([
-        {
-          key: {
-            id: 'msg-8b',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: {
-            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
-          },
-          pushName: 'Frank',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
-      ]);
-
-      expect(opts.onMessage).toHaveBeenCalledTimes(1);
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: '[Voice Message - transcription unavailable]',
-        }),
-      );
-    });
-
-    it('falls back when transcription throws', async () => {
-      vi.mocked(transcribeAudioMessage).mockRejectedValueOnce(
-        new Error('API error'),
-      );
-
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-
-      await connectChannel(channel);
-
-      await triggerMessages([
-        {
-          key: {
-            id: 'msg-8c',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: {
-            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
-          },
-          pushName: 'Frank',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
-      ]);
-
-      expect(opts.onMessage).toHaveBeenCalledTimes(1);
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: '[Voice Message - transcription failed]',
-        }),
-      );
+      // Skipped — no text content to process
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
     it('uses sender JID when pushName is absent', async () => {

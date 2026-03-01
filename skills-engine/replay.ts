@@ -195,9 +195,18 @@ export async function replaySkills(
           continue;
         }
 
+        // If the base doesn't exist, the file was added by a previous skill
+        // (not present in upstream). Use a temp file as the base instead of
+        // polluting .nanoclaw/base/ — which would cause clean-skills to
+        // incorrectly restore add-only files.
+        let tmpBase: string | null = null;
         if (!fs.existsSync(mergeBasePath)) {
-          fs.mkdirSync(path.dirname(mergeBasePath), { recursive: true });
-          fs.copyFileSync(currentPath, mergeBasePath);
+          tmpBase = path.join(
+            os.tmpdir(),
+            `nanoclaw-base-${crypto.randomUUID()}-${path.basename(relPath)}`,
+          );
+          fs.copyFileSync(currentPath, tmpBase);
+          mergeBasePath = tmpBase;
         }
 
         const tmpCurrent = path.join(
@@ -207,6 +216,9 @@ export async function replaySkills(
         fs.copyFileSync(currentPath, tmpCurrent);
 
         const result = mergeFile(tmpCurrent, mergeBasePath, skillPath);
+        if (tmpBase) {
+          try { fs.unlinkSync(tmpBase); } catch { /* ignore */ }
+        }
 
         if (result.clean) {
           fs.copyFileSync(tmpCurrent, currentPath);

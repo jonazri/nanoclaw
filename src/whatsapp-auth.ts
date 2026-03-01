@@ -60,7 +60,6 @@ async function connectSocket(
     process.exit(0);
   }
 
-  // undefined version falls through to Baileys' built-in default
   const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
     logger.warn(
       { err },

@@ -1,4 +1,3 @@
-import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,26 +11,14 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import {
-  sendGoogleAssistantCommand,
-  resetGoogleAssistantConversation,
-  googleAssistantHealth,
-} from './google-assistant.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendReaction: (
-    jid: string,
-    emoji: string,
-    messageId?: string,
-  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
-  unregisterGroup: (jid: string) => boolean;
   syncGroupMetadata: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -40,8 +27,6 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
-  statusHeartbeat?: () => void;
-  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -56,16 +41,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
-  const RECOVERY_INTERVAL_MS = 60_000;
-  let lastRecoveryTime = Date.now();
-
   const processIpcFiles = async () => {
-    if (isShabbatOrYomTov()) {
-      logger.debug('Shabbat/Yom Tov active, skipping IPC processing');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
-      return;
-    }
-
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -112,43 +88,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
-                  );
-                }
-              } else if (
-                data.type === 'reaction' &&
-                data.chatJid &&
-                data.emoji
-              ) {
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  try {
-                    await deps.sendReaction(
-                      data.chatJid,
-                      data.emoji,
-                      data.messageId,
-                    );
-                    logger.info(
-                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
-                      'IPC reaction sent',
-                    );
-                  } catch (err) {
-                    logger.error(
-                      {
-                        chatJid: data.chatJid,
-                        emoji: data.emoji,
-                        sourceGroup,
-                        err,
-                      },
-                      'IPC reaction failed',
-                    );
-                  }
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC reaction attempt blocked',
                   );
                 }
               }
@@ -206,16 +145,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
-    // Status emoji heartbeat — detect dead containers with stale emoji state
-    deps.statusHeartbeat?.();
-
-    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
-    const now = Date.now();
-    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
-      lastRecoveryTime = now;
-      deps.recoverPendingMessages?.();
-    }
-
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
@@ -241,8 +170,6 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-    requestId?: string;
-    text?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -324,21 +251,10 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
-
-        // Scheduled task results always go to the main (private) chat,
-        // never to a group. group_folder already identifies the context.
-        const mainJid = Object.entries(registeredGroups).find(
-          ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
-        )?.[0];
-        if (!mainJid) {
-          logger.warn('Cannot schedule task: main group not registered');
-          break;
-        }
-
         createTask({
           id: taskId,
           group_folder: targetFolder,
-          chat_jid: mainJid,
+          chat_jid: targetJid,
           prompt: data.prompt,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
@@ -464,109 +380,6 @@ export async function processTaskIpc(
         );
       }
       break;
-
-    case 'unregister_group':
-      if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized unregister_group attempt blocked',
-        );
-        break;
-      }
-      if (data.jid) {
-        const deleted = deps.unregisterGroup(data.jid);
-        if (deleted) {
-          logger.info(
-            { jid: data.jid, sourceGroup },
-            'Group unregistered via IPC',
-          );
-        } else {
-          logger.warn(
-            { jid: data.jid, sourceGroup },
-            'unregister_group: JID not found',
-          );
-        }
-      } else {
-        logger.warn({ data }, 'Invalid unregister_group request - missing jid');
-      }
-      break;
-
-    case 'refresh_oauth': {
-      const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
-      exec(script, { timeout: 60_000 }, (err, stdout, stderr) => {
-        if (err) {
-          logger.error({ err, stderr, sourceGroup }, 'OAuth refresh failed');
-        } else {
-          logger.info({ sourceGroup }, 'OAuth token refreshed via IPC');
-        }
-      });
-      break;
-    }
-
-    case 'google_assistant_command': {
-      const requestId = data.requestId as string | undefined;
-      const text = data.text as string | undefined;
-
-      const writeIpcResponse = (reqId: string, response: object) => {
-        const responsesDir = path.join(
-          DATA_DIR,
-          'ipc',
-          sourceGroup,
-          'responses',
-        );
-        fs.mkdirSync(responsesDir, { recursive: true });
-        const responseFile = path.join(responsesDir, `${reqId}.json`);
-        const tempFile = `${responseFile}.tmp`;
-        fs.writeFileSync(tempFile, JSON.stringify(response));
-        fs.renameSync(tempFile, responseFile);
-      };
-
-      if (!requestId || !text) {
-        logger.warn(
-          { data },
-          'Invalid google_assistant_command: missing requestId or text',
-        );
-        if (requestId) {
-          writeIpcResponse(requestId, {
-            status: 'error',
-            error: `Invalid google_assistant_command: missing ${!text ? 'text' : 'requestId'}`,
-          });
-        }
-        break;
-      }
-
-      try {
-        const result =
-          text === '__reset_conversation__'
-            ? await resetGoogleAssistantConversation()
-            : text === '__health__'
-              ? await googleAssistantHealth()
-              : await sendGoogleAssistantCommand(text);
-
-        // Surface empty responses as explicit errors
-        if (result.warning === 'no_response_text') {
-          result.status = 'error';
-          result.error =
-            'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
-        }
-
-        writeIpcResponse(requestId, result);
-        logger.info(
-          { requestId, sourceGroup, text: text.slice(0, 50) },
-          'Google Assistant command processed',
-        );
-      } catch (err) {
-        writeIpcResponse(requestId, {
-          status: 'error',
-          error: err instanceof Error ? err.message : String(err),
-        });
-        logger.error(
-          { err, requestId, sourceGroup },
-          'Google Assistant command failed',
-        );
-      }
-      break;
-    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

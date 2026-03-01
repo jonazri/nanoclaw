@@ -477,25 +477,11 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-
-      // Detect API auth errors surfaced as result text — mark as error
-      // so the host-side retry/refresh logic kicks in.
-      const isAuthError = textResult && /Failed to authenticate\. API Error: 401/.test(textResult);
-      if (isAuthError) {
-        log('Auth error detected in result text, reporting as error');
-        writeOutput({
-          status: 'error',
-          result: null,
-          newSessionId,
-          error: textResult
-        });
-      } else {
-        writeOutput({
-          status: 'success',
-          result: textResult || null,
-          newSessionId
-        });
-      }
+      writeOutput({
+        status: 'success',
+        result: textResult || null,
+        newSessionId
+      });
     }
   }
 
