@@ -83,7 +83,7 @@ async function main() {
       const resolvedPath = resolvePathRemap(f, pathRemap);
       const fullPath = path.join(process.cwd(), resolvedPath);
       if (fs.existsSync(fullPath)) {
-        fileHashes[f] = computeFileHash(fullPath);
+        fileHashes[resolvedPath] = computeFileHash(fullPath);
       }
     }
     recordSkillApplication(manifest.skill, manifest.version, fileHashes);

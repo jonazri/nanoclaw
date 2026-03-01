@@ -76,10 +76,10 @@ for (const skill of state.applied_skills) {
     continue;
   }
 
-  // Warn about file_ops — clean-skills does not reverse them
+  // Warn about file_ops — clean-skills does not reverse them (informational only)
   if (manifest.file_ops && manifest.file_ops.length > 0) {
-    errors.push(
-      `Skill ${skill.name} uses file_ops which are not reversed by clean-skills — manual cleanup may be needed`,
+    console.warn(
+      `  ! Skill ${skill.name} uses file_ops which are not reversed by clean-skills — manual cleanup may be needed`,
     );
   }
 
@@ -170,14 +170,21 @@ if (fs.existsSync(basePkgPath)) {
 const baseEnvPath = path.join(projectRoot, BASE_DIR, '.env.example');
 const currentEnvPath = path.join(projectRoot, '.env.example');
 
-if (fs.existsSync(baseEnvPath) && fs.existsSync(currentEnvPath)) {
+if (fs.existsSync(baseEnvPath)) {
   try {
-    const baseEnv = fs.readFileSync(baseEnvPath);
-    const currentEnv = fs.readFileSync(currentEnvPath);
-    if (!baseEnv.equals(currentEnv)) {
+    if (!fs.existsSync(currentEnvPath)) {
       fs.copyFileSync(baseEnvPath, currentEnvPath);
       if (!restored.includes('.env.example')) {
         restored.push('.env.example');
+      }
+    } else {
+      const baseEnv = fs.readFileSync(baseEnvPath);
+      const currentEnv = fs.readFileSync(currentEnvPath);
+      if (!baseEnv.equals(currentEnv)) {
+        fs.copyFileSync(baseEnvPath, currentEnvPath);
+        if (!restored.includes('.env.example')) {
+          restored.push('.env.example');
+        }
       }
     }
   } catch (err) {
