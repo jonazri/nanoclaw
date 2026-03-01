@@ -7,6 +7,7 @@ adds:
   - container/skills/reactions/SKILL.md
   - src/status-tracker.ts
   - src/status-tracker.test.ts
+  - src/db.test.ts
 modifies:
   - src/db.ts
   - src/channels/whatsapp.ts
@@ -15,6 +16,8 @@ modifies:
   - src/index.ts
   - src/group-queue.ts
   - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/group-queue.test.ts
+  - src/ipc-auth.test.ts
 conflicts: []
 incompatible_with:
   - voice-recognition

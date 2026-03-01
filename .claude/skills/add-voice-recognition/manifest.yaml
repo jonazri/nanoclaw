@@ -5,8 +5,10 @@ core_version: 0.1.0
 adds:
   - src/voice-recognition.ts
   - scripts/voice-recognition-service.py
+  - scripts/enroll-voice.ts
 modifies:
   - src/channels/whatsapp.ts
+  - src/config.ts
 conflicts: []
 incompatible_with:
   - voice-transcription
