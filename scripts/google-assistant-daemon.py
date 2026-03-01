@@ -191,10 +191,8 @@ class AssistantClient:
             _save_credentials(self.credentials)
             self._connect()
 
-    def send_text_query(self, text: str) -> dict:
-        """Send a text query and return the response."""
-        self._ensure_fresh_credentials()
-
+    def _do_assist(self, text: str) -> dict:
+        """Execute a single Assist RPC and return the parsed response."""
         device_config = embedded_assistant_pb2.DeviceConfig(
             device_id=self.device_config["device_instance_id"],
             device_model_id=self.device_config["device_model_id"],
@@ -228,35 +226,22 @@ class AssistantClient:
         response_text = ""
         raw_html = ""
 
-        try:
-            for response in self.assistant.Assist(iter([request]), timeout=25):
-                # Update conversation state for multi-turn
-                if response.dialog_state_out.conversation_state:
-                    self.conversation_state = (
-                        response.dialog_state_out.conversation_state
-                    )
+        for response in self.assistant.Assist(iter([request]), timeout=25):
+            # Update conversation state for multi-turn
+            if response.dialog_state_out.conversation_state:
+                self.conversation_state = (
+                    response.dialog_state_out.conversation_state
+                )
 
-                # Primary: supplemental display text
-                if response.dialog_state_out.supplemental_display_text:
-                    response_text = (
-                        response.dialog_state_out.supplemental_display_text
-                    )
+            # Primary: supplemental display text
+            if response.dialog_state_out.supplemental_display_text:
+                response_text = (
+                    response.dialog_state_out.supplemental_display_text
+                )
 
-                # Fallback: HTML screen output
-                if response.screen_out.data:
-                    raw_html = response.screen_out.data.decode("utf-8", errors="replace")
-
-        except grpc.RpcError as e:
-            sys.stderr.write(f"gRPC error: {e.code().name}: {e.details()}\n")
-            if e.code() in (grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.DEADLINE_EXCEEDED):
-                if e.code() == grpc.StatusCode.UNAUTHENTICATED:
-                    sys.stderr.write("Token expired, refreshing and reconnecting...\n")
-                    self.credentials.refresh(google.auth.transport.requests.Request())
-                    _save_credentials(self.credentials)
-                else:
-                    sys.stderr.write("Request timed out, reconnecting...\n")
-            self._connect()
-            return {"error": f"gRPC error: {e.code().name}: {e.details()}"}
+            # Fallback: HTML screen output
+            if response.screen_out.data:
+                raw_html = response.screen_out.data.decode("utf-8", errors="replace")
 
         # If no supplemental text, try extracting from HTML
         if not response_text and raw_html:
@@ -268,6 +253,32 @@ class AssistantClient:
         if not response_text:
             result["warning"] = "no_response_text"
         return result
+
+    def send_text_query(self, text: str) -> dict:
+        """Send a text query, retrying once on UNAUTHENTICATED."""
+        self._ensure_fresh_credentials()
+
+        try:
+            return self._do_assist(text)
+        except grpc.RpcError as e:
+            sys.stderr.write(f"gRPC error: {e.code().name}: {e.details()}\n")
+
+            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+                sys.stderr.write("Token expired, refreshing and retrying...\n")
+                self.credentials.refresh(google.auth.transport.requests.Request())
+                _save_credentials(self.credentials)
+                self._connect()
+                try:
+                    return self._do_assist(text)
+                except grpc.RpcError as e2:
+                    sys.stderr.write(f"Retry failed: {e2.code().name}: {e2.details()}\n")
+                    return {"error": f"gRPC error: {e2.code().name}: {e2.details()}"}
+
+            if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                sys.stderr.write("Request timed out, reconnecting...\n")
+                self._connect()
+
+            return {"error": f"gRPC error: {e.code().name}: {e.details()}"}
 
     def reset_conversation(self):
         """Clear conversation state for a fresh start."""
