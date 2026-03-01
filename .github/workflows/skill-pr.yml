@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   # ── Policy gate ────────────────────────────────────────────────────────
@@ -71,7 +70,7 @@ jobs:
       - name: Verify clean cycle
         run: |
           npm run clean-skills -- --force
-          git diff --exit-code -- src/ container/ package.json
+          git diff --exit-code -- src/ container/ package.json .env.example
 
   # ── Summary gate for branch protection ────────────────────────────────
   skill-validation-summary:

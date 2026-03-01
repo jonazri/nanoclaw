@@ -5,6 +5,7 @@ import { initNanoclawDir } from '../skills-engine/init.js';
 import { readManifest } from '../skills-engine/manifest.js';
 import { replaySkills, findSkillDir } from '../skills-engine/replay.js';
 import { computeFileHash, readState, recordSkillApplication } from '../skills-engine/state.js';
+import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
 
@@ -73,12 +74,14 @@ async function main() {
   }
 
   // Record each applied skill in state.yaml so clean-skills can undo them
+  const pathRemap = loadPathRemap();
   for (const skillName of config.skills) {
     const dir = skillDirs[skillName];
     const manifest = readManifest(dir);
     const fileHashes: Record<string, string> = {};
     for (const f of [...manifest.adds, ...manifest.modifies]) {
-      const fullPath = path.join(process.cwd(), f);
+      const resolvedPath = resolvePathRemap(f, pathRemap);
+      const fullPath = path.join(process.cwd(), resolvedPath);
       if (fs.existsSync(fullPath)) {
         fileHashes[f] = computeFileHash(fullPath);
       }
