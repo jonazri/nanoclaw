@@ -502,15 +502,26 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   // Roll back any piped-message cursors that were persisted before a crash.
   // This ensures messages piped to a now-dead container are re-fetched.
+  // IMPORTANT: Only roll back if the container is no longer running — rolling
+  // back while the container is alive causes duplicate processing.
+  let rolledBack = false;
   for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
+    if (queue.isActive(chatJid)) {
+      logger.debug(
+        { chatJid },
+        'Recovery: skipping piped-cursor rollback, container still active',
+      );
+      continue;
+    }
     logger.info(
       { chatJid, rolledBackTo: savedCursor },
       'Recovery: rolling back piped-message cursor',
     );
     lastAgentTimestamp[chatJid] = savedCursor;
+    delete cursorBeforePipe[chatJid];
+    rolledBack = true;
   }
-  if (Object.keys(cursorBeforePipe).length > 0) {
-    cursorBeforePipe = {};
+  if (rolledBack) {
     saveState();
   }
 
