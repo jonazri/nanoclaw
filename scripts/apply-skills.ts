@@ -2,11 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
 import { initNanoclawDir } from '../skills-engine/init.js';
+import { readManifest } from '../skills-engine/manifest.js';
 import { replaySkills, findSkillDir } from '../skills-engine/replay.js';
-import { readState } from '../skills-engine/state.js';
+import { computeFileHash, readState, recordSkillApplication } from '../skills-engine/state.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
-const SKILLS_DIR = '.claude/skills';
 
 interface InstalledSkills {
   skills: string[];
@@ -70,6 +70,20 @@ async function main() {
     }
     if (result.error) console.error(result.error);
     process.exit(1);
+  }
+
+  // Record each applied skill in state.yaml so clean-skills can undo them
+  for (const skillName of config.skills) {
+    const dir = skillDirs[skillName];
+    const manifest = readManifest(dir);
+    const fileHashes: Record<string, string> = {};
+    for (const f of [...manifest.adds, ...manifest.modifies]) {
+      const fullPath = path.join(process.cwd(), f);
+      if (fs.existsSync(fullPath)) {
+        fileHashes[f] = computeFileHash(fullPath);
+      }
+    }
+    recordSkillApplication(manifest.skill, manifest.version, fileHashes);
   }
 
   console.log(`Successfully applied ${config.skills.length} skills.`);

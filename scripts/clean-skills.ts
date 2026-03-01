@@ -17,7 +17,7 @@ import { execSync } from 'child_process';
 import { readState, writeState } from '../skills-engine/state.js';
 import { readManifest } from '../skills-engine/manifest.js';
 import { findSkillDir } from '../skills-engine/replay.js';
-import { BASE_DIR, NANOCLAW_DIR } from '../skills-engine/constants.js';
+import { BASE_DIR } from '../skills-engine/constants.js';
 
 const projectRoot = process.cwd();
 const force = process.argv.includes('--force');
