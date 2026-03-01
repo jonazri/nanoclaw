@@ -8,6 +8,9 @@ on:
       - '.claude/skills/**'
       - 'src/**'
 
+permissions:
+  contents: read
+
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest

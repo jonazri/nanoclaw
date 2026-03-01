@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths: ['src/**', 'container/**', 'launchd/**', 'CLAUDE.md']
 
+permissions:
+  contents: write
+
 jobs:
   update-tokens:
     runs-on: ubuntu-latest
