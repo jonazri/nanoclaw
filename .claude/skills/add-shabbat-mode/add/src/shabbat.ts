@@ -91,6 +91,7 @@ export function isShabbatOrYomTov(): boolean {
 }
 
 const CANDLE_LIGHTING_MINUTES = 18;
+const CANDLE_LIGHTING_OFFSET_MS = CANDLE_LIGHTING_MINUTES * 60 * 1000;
 const NOTIFY_CHECK_MS = 30 * 60 * 1000;
 const NOTIFY_HORIZON_MS = 6 * 60 * 60 * 1000;
 
@@ -103,7 +104,6 @@ export function getNextCandleLighting(): {
 } | null {
   if (!schedule) return null;
   const now = Date.now();
-  const offset = CANDLE_LIGHTING_MINUTES * 60 * 1000;
 
   // Binary search for the first window whose candle lighting is in the future
   let lo = 0;
@@ -112,7 +112,7 @@ export function getNextCandleLighting(): {
 
   while (lo <= hi) {
     const mid = (lo + hi) >>> 1;
-    const candleLighting = windowStarts[mid] - offset;
+    const candleLighting = windowStarts[mid] - CANDLE_LIGHTING_OFFSET_MS;
     if (candleLighting > now) {
       candidate = mid;
       hi = mid - 1;
@@ -123,7 +123,7 @@ export function getNextCandleLighting(): {
 
   if (candidate === -1) return null;
   return {
-    time: new Date(windowStarts[candidate] - offset),
+    time: new Date(windowStarts[candidate] - CANDLE_LIGHTING_OFFSET_MS),
     label: schedule.windows[candidate].label,
   };
 }
@@ -144,13 +144,12 @@ export function startCandleLightingNotifier(
     const next = getNextCandleLighting();
     if (!next) return;
 
-    const windowStart =
-      next.time.getTime() + CANDLE_LIGHTING_MINUTES * 60 * 1000;
-    if (windowStart === lastNotifiedStart) return;
+    const candleLightingMs = next.time.getTime();
+    if (candleLightingMs === lastNotifiedStart) return;
 
     const timeUntil = next.time.getTime() - Date.now();
     if (timeUntil > 0 && timeUntil <= NOTIFY_HORIZON_MS) {
-      lastNotifiedStart = windowStart;
+      lastNotifiedStart = candleLightingMs;
       const timeStr = formatTime(next.time);
       const label = next.label.includes('Shabbat')
         ? 'Shabbat Shalom! '
