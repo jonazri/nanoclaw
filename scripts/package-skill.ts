@@ -237,7 +237,7 @@ Read \`.nanoclaw/state.yaml\`. If \`${skillName}\` is in \`applied_skills\`, ski
 ### Apply the skill
 
 \`\`\`bash
-npx tsx scripts/apply-skill.ts .claude/skills/${skillName}
+npm run apply-skills
 \`\`\`
 
 TODO: Document any post-apply steps (migrations, config, etc.)
@@ -313,5 +313,5 @@ console.log('     - Verify the adds and modifies lists');
 console.log(`  2. Edit .claude/skills/${skillName}/SKILL.md`);
 console.log('     - Write installation instructions');
 console.log('     - Add verification and troubleshooting steps');
-console.log('  3. Validate the skill applies cleanly:');
-console.log(`     npx tsx scripts/validate-all-skills.ts ${skillName}`);
+console.log('  3. Add to .nanoclaw/installed-skills.yaml and validate:');
+console.log('     npm run build');
