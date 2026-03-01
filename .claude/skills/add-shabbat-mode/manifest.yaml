@@ -14,6 +14,9 @@ modifies:
 structured:
   npm_dependencies:
     "@hebcal/core": "^6.0.8"
+modify_base:
+  src/index.ts: _accumulated
+  src/task-scheduler.ts: _accumulated
 conflicts: []
 depends: []
 test: "npx vitest run src/shabbat.test.ts"

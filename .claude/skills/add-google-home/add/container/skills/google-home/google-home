@@ -8,7 +8,6 @@ IPC_DIR="/workspace/ipc"
 TASKS_DIR="${IPC_DIR}/tasks"
 RESPONSES_DIR="${IPC_DIR}/responses"
 POLL_INTERVAL=0.5
-TIMEOUT=30
 
 # Generate a unique request ID
 gen_request_id() {
@@ -36,7 +35,7 @@ write_task() {
 }
 
 # Poll for a response file, timeout after MAX_ATTEMPTS * POLL_INTERVAL seconds
-MAX_ATTEMPTS=60  # 60 * 0.5s = 30s
+MAX_ATTEMPTS=120  # 120 * 0.5s = 60s (allows for daemon restart + retry)
 
 poll_response() {
   local request_id="$1"
@@ -45,20 +44,18 @@ poll_response() {
 
   while (( attempt < MAX_ATTEMPTS )); do
     if [[ -f "$response_file" ]]; then
-      local content
-      content=$(cat "$response_file")
-      rm -f "$response_file"
-
-      # Check for error
+      # Use jq directly on the file to avoid echo mangling large responses
       local error
-      error=$(echo "$content" | jq -r '.error // empty')
+      error=$(jq -r '.error // empty' "$response_file")
       if [[ -n "$error" ]]; then
+        rm -f "$response_file"
         echo "Error: $error" >&2
         return 1
       fi
 
       # Print the text response
-      echo "$content" | jq -r '.text // .status // .'
+      jq -r '.text // .status // .' "$response_file"
+      rm -f "$response_file"
       return 0
     fi
 
@@ -66,8 +63,13 @@ poll_response() {
     (( attempt++ ))
   done
 
-  echo "Error: Timed out waiting for response after ${TIMEOUT}s" >&2
+  echo "Error: Timed out waiting for response after 60s" >&2
   return 1
+}
+
+# Clean up stale response files older than 5 minutes
+cleanup_stale_responses() {
+  find "$RESPONSES_DIR" -name '*.json' -mmin +5 -delete 2>/dev/null || true
 }
 
 # Send a command and wait for response
@@ -76,6 +78,7 @@ send_and_wait() {
   local request_id
   request_id=$(gen_request_id)
 
+  cleanup_stale_responses
   write_task "$request_id" "$text"
   poll_response "$request_id"
 }

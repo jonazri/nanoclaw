@@ -156,8 +156,33 @@ export async function replaySkills(
       for (const relPath of manifest.modifies) {
         const resolvedPath = resolvePathRemap(relPath, pathRemap);
         const currentPath = path.join(projectRoot, resolvedPath);
-        const basePath = path.join(baseDir, resolvedPath);
+        let mergeBasePath = path.join(baseDir, resolvedPath);
         const skillPath = path.join(skillDir, 'modify', relPath);
+
+        // modify_base: use another skill's modify file as the merge base
+        // instead of the upstream base. This allows a dependent skill's modify
+        // file to include its dependency's changes, avoiding "both sides added"
+        // conflicts when both skills modify the same region.
+        //
+        // Special value "_accumulated": use the current accumulated state
+        // (before this skill) as the merge base. This is for skills whose
+        // modify file was built FROM the accumulated state — making
+        // diff(base, current) empty so only the skill's pure changes apply.
+        if (manifest.modify_base?.[relPath]) {
+          const baseSkillName = manifest.modify_base[relPath];
+          if (baseSkillName === '_accumulated') {
+            // Use current file as base — diff(base, current) will be empty
+            mergeBasePath = currentPath;
+          } else {
+            const baseSkillDir = options.skillDirs[baseSkillName];
+            if (baseSkillDir) {
+              const customBase = path.join(baseSkillDir, 'modify', relPath);
+              if (fs.existsSync(customBase)) {
+                mergeBasePath = customBase;
+              }
+            }
+          }
+        }
 
         if (!fs.existsSync(skillPath)) {
           skillConflicts.push(relPath);
@@ -170,9 +195,9 @@ export async function replaySkills(
           continue;
         }
 
-        if (!fs.existsSync(basePath)) {
-          fs.mkdirSync(path.dirname(basePath), { recursive: true });
-          fs.copyFileSync(currentPath, basePath);
+        if (!fs.existsSync(mergeBasePath)) {
+          fs.mkdirSync(path.dirname(mergeBasePath), { recursive: true });
+          fs.copyFileSync(currentPath, mergeBasePath);
         }
 
         const tmpCurrent = path.join(
@@ -181,7 +206,7 @@ export async function replaySkills(
         );
         fs.copyFileSync(currentPath, tmpCurrent);
 
-        const result = mergeFile(tmpCurrent, basePath, skillPath);
+        const result = mergeFile(tmpCurrent, mergeBasePath, skillPath);
 
         if (result.clean) {
           fs.copyFileSync(tmpCurrent, currentPath);

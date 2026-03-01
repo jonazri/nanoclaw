@@ -8,12 +8,14 @@ adds:
   - scripts/enroll-voice.ts
 modifies:
   - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
   - src/config.ts
+  - src/transcription.ts
+modify_base:
+  src/channels/whatsapp.ts: voice-transcription-elevenlabs
+  src/channels/whatsapp.test.ts: voice-transcription-elevenlabs
 conflicts: []
-incompatible_with:
-  - voice-transcription
+depends:
   - voice-transcription-elevenlabs
-  - reactions
-depends: []
 tested_with: []
 test: "npx tsc --noEmit"

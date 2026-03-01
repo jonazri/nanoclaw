@@ -4,47 +4,21 @@
  * Uses @hebcal/core to compute shkiya and tzeis times.
  * Outputs a flat JSON file of restricted windows to data/shabbat-schedule.json.
  *
- * Standalone script — install @hebcal/core first:
- *   npm install --no-save @hebcal/core
- *   SHABBAT_LAT=... SHABBAT_LNG=... SHABBAT_TIMEZONE=... npx tsx scripts/generate-zmanim.ts
+ * Run: npm run generate-zmanim
  */
 import fs from 'fs';
 import path from 'path';
 import { GeoLocation, Zmanim, HebrewCalendar, flags } from '@hebcal/core';
 
-// Required: SHABBAT_LAT, SHABBAT_LNG, SHABBAT_TIMEZONE
-// Optional: SHABBAT_LOCATION, SHABBAT_ELEVATION (default 0), SHABBAT_IL (default false),
-//           SHABBAT_BUFFER (default 18 min), SHABBAT_YEARS (default 5)
-if (!process.env.SHABBAT_LAT || !process.env.SHABBAT_LNG) {
-  console.error(
-    'Error: SHABBAT_LAT and SHABBAT_LNG environment variables are required.',
-  );
-  console.error(
-    'Example: SHABBAT_LAT=31.778 SHABBAT_LNG=35.235 SHABBAT_TIMEZONE=Asia/Jerusalem SHABBAT_IL=true npm run generate-zmanim',
-  );
-  process.exit(1);
-}
-if (!process.env.SHABBAT_TIMEZONE) {
-  console.error('Error: SHABBAT_TIMEZONE environment variable is required.');
-  console.error(
-    'Examples: America/New_York, America/Los_Angeles, Asia/Jerusalem, Europe/London',
-  );
-  process.exit(1);
-}
-
-const LAT = parseFloat(process.env.SHABBAT_LAT);
-const LNG = parseFloat(process.env.SHABBAT_LNG);
-const ELEVATION = parseFloat(process.env.SHABBAT_ELEVATION || '0');
-const LOCATION_NAME = process.env.SHABBAT_LOCATION || `${LAT}, ${LNG}`;
-const TIMEZONE = process.env.SHABBAT_TIMEZONE;
-const ISRAEL_MODE = process.env.SHABBAT_IL === 'true';
+// Defaults — override via CLI args or edit before running
+const LAT = parseFloat(process.env.SHABBAT_LAT || '40.669');
+const LNG = parseFloat(process.env.SHABBAT_LNG || '-73.943');
+const ELEVATION = parseFloat(process.env.SHABBAT_ELEVATION || '25');
+const LOCATION_NAME = process.env.SHABBAT_LOCATION || 'Crown Heights, Brooklyn';
+const TIMEZONE = process.env.SHABBAT_TIMEZONE || 'America/New_York';
 const YEARS_TO_GENERATE = parseInt(process.env.SHABBAT_YEARS || '5', 10);
 const TZEIS_BUFFER_MINUTES = parseInt(process.env.SHABBAT_BUFFER || '18', 10);
-const OUTPUT_PATH = path.resolve(
-  process.cwd(),
-  'data',
-  'shabbat-schedule.json',
-);
+const OUTPUT_PATH = path.resolve(process.cwd(), 'data', 'shabbat-schedule.json');
 
 interface ShabbatWindow {
   start: string;
@@ -92,7 +66,7 @@ function generateWindows(startYear: number, endYear: number): ShabbatWindow[] {
     const events = HebrewCalendar.calendar({
       year,
       isHebrewYear: false,
-      il: ISRAEL_MODE,
+      il: false,
       mask: flags.CHAG,
     });
 
@@ -110,9 +84,7 @@ function generateWindows(startYear: number, endYear: number): ShabbatWindow[] {
   }
 
   // Sort and merge overlapping windows
-  rawWindows.sort(
-    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
-  );
+  rawWindows.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   const merged: ShabbatWindow[] = [];
   for (const w of rawWindows) {
@@ -135,11 +107,8 @@ const now = new Date();
 const startYear = now.getFullYear();
 const endYear = startYear + YEARS_TO_GENERATE - 1;
 
-console.log(
-  `Generating Shabbat/Yom Tov schedule for ${startYear}-${endYear}...`,
-);
+console.log(`Generating Shabbat/Yom Tov schedule for ${startYear}-${endYear}...`);
 console.log(`Location: ${LOCATION_NAME} (${LAT}, ${LNG})`);
-console.log(`Yom Tov: ${ISRAEL_MODE ? 'Israel (1 day)' : 'Diaspora (2 days)'}`);
 
 const windows = generateWindows(startYear, endYear);
 
@@ -148,7 +117,6 @@ const schedule = {
   coordinates: [LAT, LNG],
   elevation: ELEVATION,
   timezone: TIMEZONE,
-  israelMode: ISRAEL_MODE,
   tzeisBufferMinutes: TZEIS_BUFFER_MINUTES,
   generatedAt: now.toISOString(),
   expiresAt: new Date(endYear + 1, 0, 1).toISOString(),
