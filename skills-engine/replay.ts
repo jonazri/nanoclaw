@@ -200,33 +200,32 @@ export async function replaySkills(
         // polluting .nanoclaw/base/ — which would cause clean-skills to
         // incorrectly restore add-only files.
         let tmpBase: string | null = null;
-        if (!fs.existsSync(mergeBasePath)) {
-          tmpBase = path.join(
+        let tmpCurrent: string | null = null;
+        try {
+          if (!fs.existsSync(mergeBasePath)) {
+            tmpBase = path.join(
+              os.tmpdir(),
+              `nanoclaw-base-${crypto.randomUUID()}-${path.basename(relPath)}`,
+            );
+            fs.copyFileSync(currentPath, tmpBase);
+            mergeBasePath = tmpBase;
+          }
+
+          tmpCurrent = path.join(
             os.tmpdir(),
-            `nanoclaw-base-${crypto.randomUUID()}-${path.basename(relPath)}`,
+            `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
           );
-          fs.copyFileSync(currentPath, tmpBase);
-          mergeBasePath = tmpBase;
-        }
+          fs.copyFileSync(currentPath, tmpCurrent);
 
-        const tmpCurrent = path.join(
-          os.tmpdir(),
-          `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
-        );
-        fs.copyFileSync(currentPath, tmpCurrent);
+          const result = mergeFile(tmpCurrent, mergeBasePath, skillPath);
 
-        const result = mergeFile(tmpCurrent, mergeBasePath, skillPath);
-        if (tmpBase) {
-          try { fs.unlinkSync(tmpBase); } catch { /* ignore */ }
-        }
-
-        if (result.clean) {
           fs.copyFileSync(tmpCurrent, currentPath);
-          fs.unlinkSync(tmpCurrent);
-        } else {
-          fs.copyFileSync(tmpCurrent, currentPath);
-          fs.unlinkSync(tmpCurrent);
-          skillConflicts.push(resolvedPath);
+          if (!result.clean) {
+            skillConflicts.push(resolvedPath);
+          }
+        } finally {
+          if (tmpBase) { try { fs.unlinkSync(tmpBase); } catch { /* ignore */ } }
+          if (tmpCurrent) { try { fs.unlinkSync(tmpCurrent); } catch { /* ignore */ } }
         }
       }
 

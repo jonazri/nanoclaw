@@ -17,12 +17,17 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
 import { readState, computeFileHash } from '../skills-engine/state.js';
-import { BASE_DIR } from '../skills-engine/constants.js';
+import { BASE_DIR, SKILLS_SCHEMA_VERSION } from '../skills-engine/constants.js';
 
 const skillName = process.argv[2];
 if (!skillName) {
   console.error('Usage: npx tsx scripts/package-skill.ts <skill-name>');
   console.error('Example: npx tsx scripts/package-skill.ts add-calendar');
+  process.exit(1);
+}
+
+if (!/^[A-Za-z0-9._-]+$/.test(skillName)) {
+  console.error('Error: skill name must contain only letters, numbers, dots, hyphens, and underscores.');
   process.exit(1);
 }
 
@@ -205,7 +210,7 @@ const manifest: Manifest = {
   skill: skillName,
   version: '1.0.0',
   description: 'TODO: Add description',
-  core_version: '0.1.0',
+  core_version: SKILLS_SCHEMA_VERSION,
   adds: adds.sort(),
   modifies: modifies.sort(),
   conflicts: [],

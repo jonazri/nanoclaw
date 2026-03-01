@@ -101,6 +101,7 @@ export function refreshOAuthToken(): Promise<boolean> {
 
 const SCHEDULE_BUFFER_MS = 30 * 60 * 1000; // 30 minutes before expiry
 const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
+const MAX_DELAY_MS = 23 * 60 * 60 * 1000; // 23 hours — Node.js setTimeout overflows above ~24.8 days
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -133,7 +134,8 @@ export function startTokenRefreshScheduler(
 
       const remainingMs = expiresAt - Date.now();
       if (remainingMs > SCHEDULE_BUFFER_MS) {
-        delayMs = remainingMs - SCHEDULE_BUFFER_MS;
+        // Cap to MAX_DELAY_MS to avoid Node.js setTimeout 32-bit overflow
+        delayMs = Math.min(remainingMs - SCHEDULE_BUFFER_MS, MAX_DELAY_MS);
       } else {
         // Already close to expiry or expired — refresh soon
         delayMs = RETRY_DELAY_MS;
