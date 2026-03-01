@@ -103,6 +103,10 @@ for (const skill of state.applied_skills) {
 
   // 5. Restore files that were modified by the skill from base
   for (const relPath of manifest.modifies) {
+    // If the file was added by another skill (already deleted above),
+    // there's no base to restore — just skip it.
+    if (deleted.includes(relPath)) continue;
+
     const basePath = path.join(projectRoot, BASE_DIR, relPath);
     const currentPath = path.join(projectRoot, relPath);
 

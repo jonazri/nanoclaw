@@ -6,14 +6,15 @@ adds:
   - src/voice-recognition.ts
   - scripts/voice-recognition-service.py
   - scripts/enroll-voice.ts
-  - src/transcription.ts
 modifies:
   - src/channels/whatsapp.ts
   - src/channels/whatsapp.test.ts
   - src/config.ts
+  - src/transcription.ts
 modify_base:
   src/channels/whatsapp.ts: voice-transcription-elevenlabs
   src/channels/whatsapp.test.ts: voice-transcription-elevenlabs
+  src/transcription.ts: _accumulated
 conflicts: []
 depends:
   - voice-transcription-elevenlabs
