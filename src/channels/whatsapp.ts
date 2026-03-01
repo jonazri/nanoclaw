@@ -74,7 +74,7 @@ export class WhatsAppChannel implements Channel {
   private sock!: WASocket;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<{ jid: string; text: string; quotedKey?: QuotedMessageKey }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
   private reconnectAttempt = 0;
@@ -254,7 +254,10 @@ export class WhatsAppChannel implements Channel {
           const repliedToId = contextInfo?.stanzaId || undefined;
           const repliedToSender = contextInfo?.participant || undefined;
           const repliedToContent = extractQuotedText(
-            contextInfo?.quotedMessage as Record<string, unknown> | null | undefined,
+            contextInfo?.quotedMessage as
+              | Record<string, unknown>
+              | null
+              | undefined,
           );
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
@@ -411,7 +414,11 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    quotedKey?: QuotedMessageKey,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
@@ -421,7 +428,7 @@ export class WhatsAppChannel implements Channel {
       : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.info(
         { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
         'WA disconnected, message queued',
@@ -429,11 +436,20 @@ export class WhatsAppChannel implements Channel {
       return;
     }
     try {
-      await this.sock.sendMessage(jid, { text: prefixed });
+      if (quotedKey) {
+        await this.sock.sendMessage(jid, { text: prefixed }, {
+          quoted: {
+            key: quotedKey,
+            message: { conversation: quotedKey.content || '' },
+          },
+        });
+      } else {
+        await this.sock.sendMessage(jid, { text: prefixed });
+      }
       logger.info({ jid, length: prefixed.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
@@ -589,7 +605,16 @@ export class WhatsAppChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
+        if (item.quotedKey) {
+          await this.sock.sendMessage(item.jid, { text: item.text }, {
+            quoted: {
+              key: item.quotedKey,
+              message: { conversation: item.quotedKey.content || '' },
+            },
+          });
+        } else {
+          await this.sock.sendMessage(item.jid, { text: item.text });
+        }
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',

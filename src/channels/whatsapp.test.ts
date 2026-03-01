@@ -33,12 +33,10 @@ vi.mock('../db.js', () => ({
 // Mock transcription
 vi.mock('../transcription.js', () => ({
   isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
-  transcribeAudioMessage: vi
-    .fn()
-    .mockResolvedValue({
-      transcript: 'Hello this is a voice message',
-      audioBuffer: Buffer.from('fake-audio'),
-    }),
+  transcribeAudioMessage: vi.fn().mockResolvedValue({
+    transcript: 'Hello this is a voice message',
+    audioBuffer: Buffer.from('fake-audio'),
+  }),
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';
@@ -1155,6 +1153,61 @@ describe('WhatsAppChannel', () => {
     it('does not expose prefixAssistantName (prefix handled internally)', () => {
       const channel = new WhatsAppChannel(createTestOpts());
       expect('prefixAssistantName' in channel).toBe(false);
+    });
+  });
+
+  // --- sendMessage with quotedKey ---
+
+  describe('sendMessage with quotedKey', () => {
+    it('passes quoted option to Baileys when quotedKey provided', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      await channel.sendMessage('registered@g.us', 'My reply', {
+        id: 'original-id',
+        remoteJid: 'registered@g.us',
+        fromMe: false,
+        participant: 'bob@s.whatsapp.net',
+        content: 'The original text',
+      });
+
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ text: expect.stringContaining('My reply') }),
+        expect.objectContaining({
+          quoted: expect.objectContaining({
+            key: expect.objectContaining({ id: 'original-id' }),
+          }),
+        }),
+      );
+    });
+
+    it('sends plain message when no quotedKey provided', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      await channel.sendMessage('registered@g.us', 'Plain message');
+
+      // Called with only 2 args (no quoted option)
+      const call = vi.mocked(fakeSocket.sendMessage).mock.calls[0];
+      expect(call[2]).toBeUndefined();
+    });
+
+    it('queues message with quotedKey when disconnected', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      // Do NOT connect — channel stays disconnected
+
+      await channel.sendMessage('registered@g.us', 'Queued reply', {
+        id: 'qid',
+        remoteJid: 'registered@g.us',
+        fromMe: false,
+      });
+
+      // Should not have called sock.sendMessage
+      expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
     });
   });
 });
