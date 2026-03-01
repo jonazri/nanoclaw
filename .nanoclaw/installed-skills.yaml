@@ -1,0 +1,12 @@
+# Canonical skill install order for this fork.
+# Skills are applied sequentially at build time.
+# Order matters: each skill merges against the accumulated state.
+skills:
+  - add-reactions
+  - add-refresh-oauth
+  - add-google-home
+  - add-shabbat-mode
+  - add-voice-transcription-elevenlabs
+  - add-voice-recognition
+  - add-whatsapp-search
+  - add-perplexity-research
