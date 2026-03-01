@@ -8,11 +8,47 @@ import { logger } from './logger.js';
 export const AUTH_ERROR_PATTERN = /401|unauthorized|authentication|token.*expired|invalid.*token|expired.*token/i;
 
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const DOTENV_PATH = path.join(process.cwd(), '.env');
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Sync the OAuth token from credentials file to .env if they differ.
+ * This is a fast, in-process sync that avoids shelling out to refresh.sh.
+ */
+function syncTokenToEnv(): void {
+  try {
+    const creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf-8'));
+    const credToken: string | undefined = creds?.claudeAiOauth?.accessToken;
+    if (!credToken) return;
+
+    const envContent = fs.existsSync(DOTENV_PATH)
+      ? fs.readFileSync(DOTENV_PATH, 'utf-8')
+      : '';
+    const envToken = envContent.match(/^CLAUDE_CODE_OAUTH_TOKEN=(.+)$/m)?.[1];
+
+    if (envToken === credToken) return; // Already in sync
+
+    // Atomic replace: strip old token line, append new one
+    const filtered = envContent
+      .split('\n')
+      .filter((l) => !l.startsWith('CLAUDE_CODE_OAUTH_TOKEN='))
+      .join('\n');
+    const updated =
+      filtered.endsWith('\n') || filtered === ''
+        ? `${filtered}CLAUDE_CODE_OAUTH_TOKEN=${credToken}\n`
+        : `${filtered}\nCLAUDE_CODE_OAUTH_TOKEN=${credToken}\n`;
+    fs.writeFileSync(`${DOTENV_PATH}.tmp`, updated);
+    fs.renameSync(`${DOTENV_PATH}.tmp`, DOTENV_PATH);
+    logger.info('Synced OAuth token from credentials to .env');
+  } catch (err) {
+    logger.debug({ err }, 'Could not sync token to .env');
+  }
+}
 
 /**
  * Ensure the OAuth token is fresh before spawning a container.
  * If the token is expired or within 5 minutes of expiry, refresh it.
+ * Always syncs the credentials token to .env to prevent stale-token issues.
  * Returns true if a valid token is available, false if refresh failed.
  */
 export async function ensureTokenFresh(): Promise<boolean> {
@@ -30,6 +66,7 @@ export async function ensureTokenFresh(): Promise<boolean> {
     const remainingMs = expiresAt - nowMs;
 
     if (remainingMs > REFRESH_BUFFER_MS) {
+      syncTokenToEnv();
       return true; // Token still fresh
     }
 
@@ -37,7 +74,9 @@ export async function ensureTokenFresh(): Promise<boolean> {
       { remainingMs, expiresAt: new Date(expiresAt).toISOString() },
       'Token expired or expiring soon, refreshing before container spawn',
     );
-    return await refreshOAuthToken();
+    const ok = await refreshOAuthToken();
+    if (ok) syncTokenToEnv();
+    return ok;
   } catch (err) {
     // If we can't read credentials, don't block — let the container try anyway
     logger.debug({ err }, 'Could not check token freshness');

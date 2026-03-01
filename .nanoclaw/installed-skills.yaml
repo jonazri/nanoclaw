@@ -1,0 +1,19 @@
+# Canonical skill install order for this fork.
+# Skills are applied sequentially at build time.
+# Order matters: each skill merges against the accumulated state.
+skills:
+  - reactions
+  - refresh-oauth
+  - auth-recovery
+  - group-lifecycle
+  - google-home
+  - shabbat-mode
+  - container-hardening
+  - task-scheduler-fixes
+  - whatsapp-resilience
+  - voice-transcription-elevenlabs
+  - voice-recognition
+  - whatsapp-search
+  - perplexity-research
+  - feature-request
+  - whatsapp-summary

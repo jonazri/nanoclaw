@@ -20,6 +20,7 @@ export interface IpcDeps {
   sendReaction?: (jid: string, emoji: string, messageId?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  unregisterGroup?: (jid: string) => boolean;
   syncGroupMetadata: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (

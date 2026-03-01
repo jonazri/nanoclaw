@@ -35,13 +35,47 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 | `/process-feature-request` | Review and implement PRDs written by the container agent |
 
+## Build Model (Patch Queue)
+
+This fork uses a **patch-queue model**. `src/` in git matches upstream/main exactly. All fork customizations live as skills in `.claude/skills/` and are applied at build time.
+
+```bash
+npm run build          # Apply skills -> compile -> restore src/
+npm run build:quick    # Compile only (src/ must be pre-applied)
+npm run dev            # Apply skills -> watch mode (src/ stays applied)
+npm run apply-skills   # Apply all installed skills to src/
+npm run clean-skills   # Restore src/ to upstream state
+npm run package-skill  # Extract src/ changes into a new skill
+```
+
+### Development workflow
+
+1. **Always work in a git worktree** to avoid breaking the live service:
+   ```bash
+   git worktree add ../gabay-feature feat/my-feature
+   cd ../gabay-feature
+   npm run dev
+   ```
+2. Edit src/ freely during development
+3. When feature is ready: `npm run package-skill my-feature`
+4. Add skill to `.nanoclaw/installed-skills.yaml`, run `npm run build`
+5. Commit the skill files, not the src/ changes
+
+### Upstream merges
+
+```bash
+git fetch upstream && git merge upstream/main   # trivial — src/ matches
+npm run build                                    # re-applies skills
+npx vitest run                                   # verify
+```
+
 ## Development
 
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
+npm run dev          # Apply skills + hot reload
+npm run build        # Apply skills -> compile -> restore src/
 ./container/build.sh # Rebuild agent container
 ```
 
