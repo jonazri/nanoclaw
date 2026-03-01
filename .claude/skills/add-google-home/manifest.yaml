@@ -8,10 +8,12 @@ adds:
   - scripts/google-assistant-setup.py
   - container/skills/google-home/SKILL.md
   - container/skills/google-home/google-home
+  - container/.dockerignore
 modifies:
   - src/ipc.ts
   - src/index.ts
   - src/container-runner.ts
+  - container/Dockerfile
 conflicts: []
 incompatible_with: []
 depends: []
