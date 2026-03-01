@@ -32,6 +32,7 @@ groups/global/*
 
 # Skills system (local per-installation state)
 .nanoclaw/
+!.nanoclaw/installed-skills.yaml
 
 agents-sdk-docs
 
