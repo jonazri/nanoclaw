@@ -6,6 +6,9 @@ on:
     paths:
       - '.claude/skills/**'
       - 'skills-engine/**'
+      - '.nanoclaw/installed-skills.yaml'
+      - 'scripts/apply-skills.ts'
+      - 'scripts/clean-skills.ts'
 
 jobs:
   # ── Policy gate ────────────────────────────────────────────────────────
@@ -60,6 +63,11 @@ jobs:
 
       - name: Run tests
         run: npx vitest run
+
+      - name: Verify clean cycle
+        run: |
+          npm run clean-skills -- --force
+          git diff --exit-code -- src/ container/ package.json
 
   # ── Summary gate for branch protection ────────────────────────────────
   skill-validation-summary:

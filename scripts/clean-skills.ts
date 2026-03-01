@@ -23,7 +23,13 @@ const projectRoot = process.cwd();
 const force = process.argv.includes('--force');
 
 // 1. Read state to find applied skills
-const state = readState();
+let state;
+try {
+  state = readState();
+} catch {
+  console.log('No state.yaml found — nothing to clean.');
+  process.exit(0);
+}
 
 if (state.applied_skills.length === 0) {
   console.log('No skills currently applied.');
@@ -116,22 +122,28 @@ for (const skill of state.applied_skills) {
   }
 }
 
-// 6. Restore package.json from base and run npm install
+// 6. Restore package.json from base and run npm install if changed
 const basePkgPath = path.join(projectRoot, BASE_DIR, 'package.json');
 const currentPkgPath = path.join(projectRoot, 'package.json');
 
 if (fs.existsSync(basePkgPath)) {
   try {
-    fs.copyFileSync(basePkgPath, currentPkgPath);
-    if (!restored.includes('package.json')) {
-      restored.push('package.json');
-    }
+    const basePkg = fs.readFileSync(basePkgPath);
+    const currentPkg = fs.readFileSync(currentPkgPath);
+    const pkgChanged = !basePkg.equals(currentPkg);
 
-    console.log('Running npm install to restore dependencies...');
-    execSync('npm install --silent', {
-      cwd: projectRoot,
-      stdio: 'inherit',
-    });
+    if (pkgChanged) {
+      fs.copyFileSync(basePkgPath, currentPkgPath);
+      if (!restored.includes('package.json')) {
+        restored.push('package.json');
+      }
+
+      console.log('Running npm install to restore dependencies...');
+      execSync('npm install --silent', {
+        cwd: projectRoot,
+        stdio: 'inherit',
+      });
+    }
   } catch (err) {
     errors.push(
       `Failed to restore package.json or run npm install: ${err instanceof Error ? err.message : String(err)}`,

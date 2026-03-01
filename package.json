@@ -24,8 +24,6 @@
     "package-skill": "tsx scripts/package-skill.ts"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.36.0",
-    "@hebcal/core": "^6.0.8",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
