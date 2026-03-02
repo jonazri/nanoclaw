@@ -102,35 +102,6 @@ describe('formatMessages', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
   });
-
-  it('includes reply context as nested XML when present', () => {
-    const msg = makeMsg({
-      replied_to_id: 'abc123',
-      replied_to_sender: 'Bob',
-      replied_to_content: 'Original message here',
-    });
-    const result = formatMessages([msg]);
-    expect(result).toContain('replied_to_id="abc123"');
-    expect(result).toContain('replied_to_sender="Bob"');
-    expect(result).toContain('<reply_to>Original message here</reply_to>');
-  });
-
-  it('omits reply attributes when not present', () => {
-    const result = formatMessages([makeMsg()]);
-    expect(result).not.toContain('replied_to_id');
-    expect(result).not.toContain('<reply_to>');
-  });
-
-  it('escapes special chars in reply context', () => {
-    const msg = makeMsg({
-      replied_to_id: 'x1',
-      replied_to_sender: 'A & B',
-      replied_to_content: '<script>xss</script>',
-    });
-    const result = formatMessages([msg]);
-    expect(result).toContain('replied_to_sender="A &amp; B"');
-    expect(result).toContain('&lt;script&gt;xss&lt;/script&gt;');
-  });
 });
 
 // --- TRIGGER_PATTERN ---
