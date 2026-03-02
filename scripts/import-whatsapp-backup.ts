@@ -138,6 +138,9 @@ async function phase1RagImport(
       return `${sender}${group}: ${m.text}`;
     });
 
+    lastMacTime = messages[messages.length - 1].mac_timestamp;
+    totalUpserted += messages.length;
+
     if (!dryRun) {
       const vectors = await embedBatch(texts);
       const embeddings = messages.map((m, i) => ({
@@ -157,11 +160,7 @@ async function phase1RagImport(
         },
       }));
       await qdrantClient.upsertEmbeddings(embeddings);
-      lastMacTime = messages[messages.length - 1].mac_timestamp;
       writeWatermark(lastMacTime);
-      totalUpserted += embeddings.length;
-    } else {
-      totalUpserted += messages.length;
     }
 
     console.log(`  Batch ${batchNum}: ${messages.length} messages (up to ${macTimeToIso(messages[messages.length - 1].mac_timestamp)})`);
