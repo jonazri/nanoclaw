@@ -6,14 +6,97 @@ import { readManifest } from '../skills-engine/manifest.js';
 import { replaySkills, findSkillDir } from '../skills-engine/replay.js';
 import { computeFileHash, readState, recordSkillApplication } from '../skills-engine/state.js';
 import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
+import {
+  areRangesCompatible,
+  mergeNpmDependencies,
+  runNpmInstall,
+} from '../skills-engine/structured.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
+
+/**
+ * Copy back non-src/ added files from skills after clean-skills removes them.
+ * TypeScript files in src/ are compiled to dist/ before clean-skills runs,
+ * so they don't need to be physically present after build. Everything else
+ * (Python scripts, shell scripts, container skill files, config files, etc.)
+ * must be restored for the runtime to function correctly.
+ */
+function restoreRuntimeFiles(
+  skillNames: string[],
+  skillDirs: Record<string, string>,
+): void {
+  const pathRemap = loadPathRemap();
+  const restored: string[] = [];
+
+  for (const skillName of skillNames) {
+    const manifest = readManifest(skillDirs[skillName]);
+
+    for (const relPath of manifest.adds) {
+      const resolvedPath = resolvePathRemap(relPath, pathRemap);
+
+      // src/ TypeScript files are compiled into dist/ before clean-skills runs
+      if (resolvedPath.startsWith('src/')) continue;
+
+      const destPath = path.join(process.cwd(), resolvedPath);
+      if (fs.existsSync(destPath)) continue; // Already present
+
+      const srcPath = path.join(skillDirs[skillName], 'add', resolvedPath);
+      if (!fs.existsSync(srcPath)) continue; // Not in skill's add/ dir
+
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.copyFileSync(srcPath, destPath);
+      restored.push(resolvedPath);
+    }
+  }
+
+  if (restored.length > 0) {
+    console.log(`Restored ${restored.length} runtime file(s): ${restored.join(', ')}`);
+  }
+}
+
+async function installMissingNpmDeps(
+  skillNames: string[],
+  skillDirs: Record<string, string>,
+): Promise<void> {
+  const pkgPath = path.join(process.cwd(), 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const installed: Record<string, string> = {
+    ...pkg.dependencies,
+    ...pkg.devDependencies,
+  };
+
+  let needsInstall = false;
+  for (const skillName of skillNames) {
+    const manifest = readManifest(skillDirs[skillName]);
+    if (!manifest.structured?.npm_dependencies) continue;
+
+    const deps = manifest.structured.npm_dependencies;
+    const toInstall = Object.entries(deps).filter(([name, version]) => {
+      const existing = installed[name];
+      if (!existing) return true;
+      return !areRangesCompatible(existing, version).compatible;
+    });
+    if (toInstall.length === 0) continue;
+
+    console.log(
+      `Installing skill deps for ${skillName}: ${toInstall.map(([n]) => n).join(', ')}`,
+    );
+    mergeNpmDependencies(pkgPath, deps);
+    needsInstall = true;
+  }
+
+  if (needsInstall) {
+    runNpmInstall();
+  }
+}
 
 interface InstalledSkills {
   skills: string[];
 }
 
 async function main() {
+  const depsOnly = process.argv.includes('--deps-only');
+
   // Read installed skills list
   if (!fs.existsSync(INSTALLED_SKILLS_PATH)) {
     console.log('No installed-skills.yaml found. Nothing to apply.');
@@ -29,20 +112,9 @@ async function main() {
   }
 
   // Initialize .nanoclaw/ if not present (snapshots current src/ as base)
-  if (!fs.existsSync('.nanoclaw/base')) {
+  if (!depsOnly && !fs.existsSync('.nanoclaw/base')) {
     console.log('Initializing .nanoclaw/ directory...');
     initNanoclawDir();
-  }
-
-  // Check if already applied
-  try {
-    const state = readState();
-    if (state.applied_skills.length > 0) {
-      console.log(`Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`);
-      process.exit(0);
-    }
-  } catch {
-    // No state yet — fresh apply
   }
 
   // Locate all skill directories
@@ -54,6 +126,26 @@ async function main() {
       process.exit(1);
     }
     skillDirs[skillName] = dir;
+  }
+
+  // Always ensure skill npm dependencies are installed, even if skills are already applied
+  await installMissingNpmDeps(config.skills, skillDirs);
+
+  // --deps-only: restore runtime files and install deps, don't patch src/ (used as post-build step)
+  if (depsOnly) {
+    restoreRuntimeFiles(config.skills, skillDirs);
+    process.exit(0);
+  }
+
+  // Check if already applied
+  try {
+    const state = readState();
+    if (state.applied_skills.length > 0) {
+      console.log(`Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`);
+      process.exit(0);
+    }
+  } catch {
+    // No state yet — fresh apply
   }
 
   console.log(`Applying ${config.skills.length} skills: ${config.skills.join(', ')}`);
