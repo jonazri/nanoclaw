@@ -14,6 +14,46 @@ import {
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
 
+/**
+ * Copy back non-src/ added files from skills after clean-skills removes them.
+ * TypeScript files in src/ are compiled to dist/ before clean-skills runs,
+ * so they don't need to be physically present after build. Everything else
+ * (Python scripts, shell scripts, container skill files, config files, etc.)
+ * must be restored for the runtime to function correctly.
+ */
+function restoreRuntimeFiles(
+  skillNames: string[],
+  skillDirs: Record<string, string>,
+): void {
+  const pathRemap = loadPathRemap();
+  const restored: string[] = [];
+
+  for (const skillName of skillNames) {
+    const manifest = readManifest(skillDirs[skillName]);
+
+    for (const relPath of manifest.adds) {
+      const resolvedPath = resolvePathRemap(relPath, pathRemap);
+
+      // src/ TypeScript files are compiled into dist/ before clean-skills runs
+      if (resolvedPath.startsWith('src/')) continue;
+
+      const destPath = path.join(process.cwd(), resolvedPath);
+      if (fs.existsSync(destPath)) continue; // Already present
+
+      const srcPath = path.join(skillDirs[skillName], 'add', resolvedPath);
+      if (!fs.existsSync(srcPath)) continue; // Not in skill's add/ dir
+
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.copyFileSync(srcPath, destPath);
+      restored.push(resolvedPath);
+    }
+  }
+
+  if (restored.length > 0) {
+    console.log(`Restored ${restored.length} runtime file(s): ${restored.join(', ')}`);
+  }
+}
+
 async function installMissingNpmDeps(
   skillNames: string[],
   skillDirs: Record<string, string>,
@@ -91,8 +131,11 @@ async function main() {
   // Always ensure skill npm dependencies are installed, even if skills are already applied
   await installMissingNpmDeps(config.skills, skillDirs);
 
-  // --deps-only: just install deps, don't patch files (used as post-build step)
-  if (depsOnly) process.exit(0);
+  // --deps-only: restore runtime files and install deps, don't patch src/ (used as post-build step)
+  if (depsOnly) {
+    restoreRuntimeFiles(config.skills, skillDirs);
+    process.exit(0);
+  }
 
   // Check if already applied
   try {
