@@ -72,6 +72,18 @@ describe('formatMessages', () => {
     expect(result).toContain('id="msg-xyz"');
   });
 
+  it('includes id attribute in reply branch', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'reply-123', replied_to_content: 'Original message' }),
+    ]);
+    expect(result).toContain('id="reply-123"');
+  });
+
+  it('escapes special characters in id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'id-"&"' })]);
+    expect(result).toContain('id="id-&quot;&amp;&quot;"');
+  });
+
   it('formats multiple messages', () => {
     const msgs = [
       makeMsg({

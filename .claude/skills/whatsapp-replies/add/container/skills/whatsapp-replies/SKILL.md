@@ -16,7 +16,7 @@ Every message in the XML includes an `id` attribute. The **last `<message>` elem
 When a user replies to an earlier message, the message XML also includes reply metadata:
 
 ```xml
-<message id="MSG_ID_HERE" sender="Bob" time="2026-..." replied_to_id="abc123" replied_to_sender="Alice">
+<message id="MSG_ID_HERE" sender="Bob" time="2026-..." replied_to_id="abc123" replied_to_sender="972501234567@s.whatsapp.net">
   <reply_to>Alice's original message text</reply_to>
   Bob's reply text here
 </message>
@@ -24,7 +24,7 @@ When a user replies to an earlier message, the message XML also includes reply m
 
 - `id` — this message's own ID (use this to thread your reply to it)
 - `replied_to_id` — the ID of the message Bob is replying to
-- `replied_to_sender` — the JID of who sent the original message
+- `replied_to_sender` — the **JID** (e.g. `972501234567@s.whatsapp.net`) of who sent the original message
 - `<reply_to>` — the text of the original message
 
 Use reply context to give contextually accurate responses. E.g. if Bob is replying to Alice's question, your response can acknowledge that clearly.
