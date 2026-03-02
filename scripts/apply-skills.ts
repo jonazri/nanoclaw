@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
@@ -7,6 +6,11 @@ import { readManifest } from '../skills-engine/manifest.js';
 import { replaySkills, findSkillDir } from '../skills-engine/replay.js';
 import { computeFileHash, readState, recordSkillApplication } from '../skills-engine/state.js';
 import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
+import {
+  areRangesCompatible,
+  mergeNpmDependencies,
+  runNpmInstall,
+} from '../skills-engine/structured.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
 
@@ -14,26 +18,36 @@ async function installMissingNpmDeps(
   skillNames: string[],
   skillDirs: Record<string, string>,
 ): Promise<void> {
-  const required: Record<string, string> = {};
-  for (const skillName of skillNames) {
-    const manifest = readManifest(skillDirs[skillName]);
-    if (manifest.structured?.npm_dependencies) {
-      Object.assign(required, manifest.structured.npm_dependencies);
-    }
-  }
-
-  if (Object.keys(required).length === 0) return;
-
   const pkgPath = path.join(process.cwd(), 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-  const installed = { ...pkg.dependencies, ...pkg.devDependencies };
+  const installed: Record<string, string> = {
+    ...pkg.dependencies,
+    ...pkg.devDependencies,
+  };
 
-  const missing = Object.entries(required).filter(([name]) => !installed[name]);
-  if (missing.length === 0) return;
+  let needsInstall = false;
+  for (const skillName of skillNames) {
+    const manifest = readManifest(skillDirs[skillName]);
+    if (!manifest.structured?.npm_dependencies) continue;
 
-  const specs = missing.map(([name, version]) => `${name}@${version}`).join(' ');
-  console.log(`Installing missing npm dependencies: ${specs}`);
-  execSync(`npm install ${specs}`, { stdio: 'inherit' });
+    const deps = manifest.structured.npm_dependencies;
+    const toInstall = Object.entries(deps).filter(([name, version]) => {
+      const existing = installed[name];
+      if (!existing) return true;
+      return !areRangesCompatible(existing, version).compatible;
+    });
+    if (toInstall.length === 0) continue;
+
+    console.log(
+      `Installing skill deps for ${skillName}: ${toInstall.map(([n]) => n).join(', ')}`,
+    );
+    mergeNpmDependencies(pkgPath, deps);
+    needsInstall = true;
+  }
+
+  if (needsInstall) {
+    runNpmInstall();
+  }
 }
 
 interface InstalledSkills {
