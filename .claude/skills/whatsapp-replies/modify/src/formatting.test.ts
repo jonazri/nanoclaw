@@ -62,9 +62,14 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
+  });
+
+  it('includes message id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'msg-xyz' })]);
+    expect(result).toContain('id="msg-xyz"');
   });
 
   it('formats multiple messages', () => {
