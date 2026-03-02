@@ -97,6 +97,7 @@ SHABBAT_LAT=<lat> SHABBAT_LNG=<lng> SHABBAT_TIMEZONE=<tz> SHABBAT_IL=<true|false
 | `SHABBAT_LOCATION` | No | Cosmetic label for logs |
 | `SHABBAT_ELEVATION` | No | Meters above sea level (default 0) |
 | `SHABBAT_BUFFER` | No | Minutes after tzeit before resuming (default 18) |
+| `SHABBAT_YEARS` | No | Years of schedule to generate (default 5) |
 
 Expected output: `data/shabbat-schedule.json` with 300+ windows covering 5 years.
 

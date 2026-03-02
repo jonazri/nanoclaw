@@ -54,10 +54,14 @@ This deterministically:
 
 ### Install Python dependencies
 
+Create a virtual environment and install dependencies:
+
 ```bash
-cd /workspace/project
-python3 -m pip install pyannote.audio torch numpy
+python3 -m venv scripts/venv
+scripts/venv/bin/pip install pyannote.audio torch numpy
 ```
+
+The service uses this venv by default (`scripts/venv/bin/python3`). Override with `VOICE_PYTHON_PATH` env var if using a different Python installation.
 
 ### Validate code changes
 
@@ -86,7 +90,7 @@ The user needs to record 3-5 voice notes (10-30 seconds each) with varied conten
 After receiving the voice samples, run:
 
 ```bash
-npx tsx scripts/enroll-voice.ts --user="[User Name]" --samples=5
+npx tsx scripts/enroll-voice.ts --user="[User Name]" --count=5
 ```
 
 This will:
@@ -97,11 +101,9 @@ This will:
 
 ### Verify enrollment
 
-```bash
-npx tsx scripts/test-voice-recognition.ts
-```
-
 Send a test voice note. The system should respond with `[Direct from [User]]`.
+
+To save audio for enrollment, set `VOICE_SAVE_AUDIO=true` in your `.env` file before sending voice messages.
 
 ## Phase 4: Usage
 
@@ -124,13 +126,13 @@ The metadata includes similarity scores:
 
 ### Update voice profile
 
-To improve recognition accuracy over time:
+The system automatically updates your profile during regular use (continuous learning). For manual re-enrollment with new samples:
 
 ```bash
-npx tsx scripts/update-voice-profile.ts --user="[User Name]" --add-samples=3
+npx tsx scripts/enroll-voice.ts --user="[User Name]" --count=3
 ```
 
-This adds new samples to the existing profile and re-averages.
+This replaces the existing profile with a fresh average of the 3 most recent audio files.
 
 ### Reset voice profile
 

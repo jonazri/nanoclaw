@@ -21,7 +21,7 @@ import {
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { identifySpeaker } from '../voice-recognition.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
@@ -233,13 +233,14 @@ export class WhatsAppChannel implements Channel {
                 this.sock,
               );
 
-              // Save raw audio for enrollment/debugging
-              if (audioBuffer) {
+              // Save raw audio for enrollment/debugging (opt-in via VOICE_SAVE_AUDIO=true)
+              if (process.env.VOICE_SAVE_AUDIO === 'true' && audioBuffer) {
                 try {
                   await fsPromises.mkdir(VOICE_AUDIO_DIR, { recursive: true });
+                  const suffix = Math.random().toString(36).slice(2, 8);
                   const audioPath = path.join(
                     VOICE_AUDIO_DIR,
-                    `${Date.now()}.ogg`,
+                    `${Date.now()}-${suffix}.ogg`,
                   );
                   await fsPromises.writeFile(audioPath, audioBuffer);
                   logger.debug({ audioPath }, 'Saved voice audio');
@@ -264,12 +265,7 @@ export class WhatsAppChannel implements Channel {
                       result.similarity >= 0.65
                     ) {
                       try {
-                        const { extractVoiceEmbedding, updateVoiceProfile } =
-                          await import('../voice-recognition.js');
-                        const embedding = await extractVoiceEmbedding(
-                          audioBuffer!,
-                        );
-                        await updateVoiceProfile(OWNER_NAME, [embedding]);
+                        await updateVoiceProfile(OWNER_NAME, [result.embedding]);
                         logger.info(
                           { similarity: result.similarity },
                           'Auto-updated voice profile with new sample',

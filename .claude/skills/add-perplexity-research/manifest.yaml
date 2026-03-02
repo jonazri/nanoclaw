@@ -8,6 +8,9 @@ modifies:
   - src/container-runner.ts
 modify_base:
   src/container-runner.ts: _accumulated
+structured:
+  env_additions:
+    - PERPLEXITY_API_KEY
 conflicts: []
 incompatible_with: []
 depends:
