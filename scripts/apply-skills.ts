@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
@@ -8,6 +9,32 @@ import { computeFileHash, readState, recordSkillApplication } from '../skills-en
 import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
+
+async function installMissingNpmDeps(
+  skillNames: string[],
+  skillDirs: Record<string, string>,
+): Promise<void> {
+  const required: Record<string, string> = {};
+  for (const skillName of skillNames) {
+    const manifest = readManifest(skillDirs[skillName]);
+    if (manifest.structured?.npm_dependencies) {
+      Object.assign(required, manifest.structured.npm_dependencies);
+    }
+  }
+
+  if (Object.keys(required).length === 0) return;
+
+  const pkgPath = path.join(process.cwd(), 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const installed = { ...pkg.dependencies, ...pkg.devDependencies };
+
+  const missing = Object.entries(required).filter(([name]) => !installed[name]);
+  if (missing.length === 0) return;
+
+  const specs = missing.map(([name, version]) => `${name}@${version}`).join(' ');
+  console.log(`Installing missing npm dependencies: ${specs}`);
+  execSync(`npm install ${specs}`, { stdio: 'inherit' });
+}
 
 interface InstalledSkills {
   skills: string[];
@@ -34,17 +61,6 @@ async function main() {
     initNanoclawDir();
   }
 
-  // Check if already applied
-  try {
-    const state = readState();
-    if (state.applied_skills.length > 0) {
-      console.log(`Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`);
-      process.exit(0);
-    }
-  } catch {
-    // No state yet — fresh apply
-  }
-
   // Locate all skill directories
   const skillDirs: Record<string, string> = {};
   for (const skillName of config.skills) {
@@ -54,6 +70,20 @@ async function main() {
       process.exit(1);
     }
     skillDirs[skillName] = dir;
+  }
+
+  // Always ensure skill npm dependencies are installed, even if skills are already applied
+  await installMissingNpmDeps(config.skills, skillDirs);
+
+  // Check if already applied
+  try {
+    const state = readState();
+    if (state.applied_skills.length > 0) {
+      console.log(`Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`);
+      process.exit(0);
+    }
+  } catch {
+    // No state yet — fresh apply
   }
 
   console.log(`Applying ${config.skills.length} skills: ${config.skills.join(', ')}`);
