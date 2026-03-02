@@ -1,11 +1,18 @@
 ---
 name: whatsapp-replies
-description: "TODO: Add description"
+description: "See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context"
 ---
 
 # whatsapp-replies
 
-TODO: Describe what this skill does.
+Adds WhatsApp reply/quote threading to NanoClaw:
+
+- **Inbound**: Extracts `contextInfo` from Baileys and surfaces `replied_to_id`, `replied_to_sender`, `replied_to_content` in the agent's message XML as `<reply_to>` elements
+- **Outbound**: Adds `quoted_message_id` param to the `send_message` MCP tool so the agent can thread replies in WhatsApp
+- **Persistence**: Stores reply fields in the `messages` SQLite table with auto-migration
+- **RAG**: Indexes reply context in Qdrant alongside message content
+
+Depends on: `whatsapp-search`
 
 ## Phase 1: Pre-flight
 
@@ -13,22 +20,26 @@ TODO: Describe what this skill does.
 
 Read `.nanoclaw/state.yaml`. If `whatsapp-replies` is in `applied_skills`, skip to Phase 4 (Verify).
 
-## Phase 2: Apply Code Changes
+### Check dependency
 
-### Apply the skill
+Confirm `whatsapp-search` is in `.nanoclaw/installed-skills.yaml` and applied first.
+
+## Phase 2: Apply Code Changes
 
 ```bash
 npm run apply-skills
 ```
 
-TODO: Document any post-apply steps (migrations, config, etc.)
+No post-apply config required. DB migration runs automatically on next startup.
 
-### Validate code changes
+### Validate
 
 ```bash
-npm test
 npm run build
+npx vitest run
 ```
+
+Expected: all tests pass (includes 9 new reply-context tests).
 
 ## Phase 3: Build and Restart
 
@@ -48,8 +59,12 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 ## Phase 4: Verify
 
-TODO: Add verification steps.
+1. Send a WhatsApp reply to an existing message in a registered group
+2. Check that the agent prompt includes `replied_to_id` and `<reply_to>` in the message XML
+3. Send a message via `send_message` with `quoted_message_id` set — confirm it threads in WhatsApp
 
 ## Troubleshooting
 
-TODO: Add common issues and solutions.
+**Reply fields not appearing**: Ensure the message has a `contextInfo.stanzaId` in Baileys (only present when the sender explicitly quoted a message, not for @mentions).
+
+**DB migration failed**: Check that `replied_to_id`, `replied_to_sender`, `replied_to_content` columns exist in the `messages` table — the migration is `ALTER TABLE ADD COLUMN` with a catch for existing columns.

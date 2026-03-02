@@ -28,8 +28,12 @@ function macTimeToIso(macTime: number): string {
 
 // --- Arg parsing ---
 const args = process.argv.slice(2);
-const backupPathArg = args.find(a => a.startsWith('--backup-path='))?.split('=')[1]
-  || args[args.indexOf('--backup-path') + 1];
+const backupPathIndex = args.indexOf('--backup-path');
+const backupPathArg =
+  args.find(a => a.startsWith('--backup-path='))?.split('=')[1] ||
+  (backupPathIndex >= 0 && backupPathIndex + 1 < args.length
+    ? args[backupPathIndex + 1]
+    : undefined);
 const dryRun = args.includes('--dry-run');
 
 if (!backupPathArg) {
@@ -188,6 +192,11 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
     (nanoclawDb.prepare('SELECT jid FROM registered_groups').all() as { jid: string }[]).map(r => r.jid)
   );
   console.log(`  Found ${registeredJids.size} registered groups: ${[...registeredJids].join(', ')}`);
+
+  if (registeredJids.size === 0) {
+    console.log('  No registered groups found, skipping Phase 2');
+    return;
+  }
 
   // Query backup messages for registered chats only
   const backupRegistered = backupDb.prepare(`
