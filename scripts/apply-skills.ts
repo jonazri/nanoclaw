@@ -55,6 +55,8 @@ interface InstalledSkills {
 }
 
 async function main() {
+  const depsOnly = process.argv.includes('--deps-only');
+
   // Read installed skills list
   if (!fs.existsSync(INSTALLED_SKILLS_PATH)) {
     console.log('No installed-skills.yaml found. Nothing to apply.');
@@ -70,7 +72,7 @@ async function main() {
   }
 
   // Initialize .nanoclaw/ if not present (snapshots current src/ as base)
-  if (!fs.existsSync('.nanoclaw/base')) {
+  if (!depsOnly && !fs.existsSync('.nanoclaw/base')) {
     console.log('Initializing .nanoclaw/ directory...');
     initNanoclawDir();
   }
@@ -88,6 +90,9 @@ async function main() {
 
   // Always ensure skill npm dependencies are installed, even if skills are already applied
   await installMissingNpmDeps(config.skills, skillDirs);
+
+  // --deps-only: just install deps, don't patch files (used as post-build step)
+  if (depsOnly) process.exit(0);
 
   // Check if already applied
   try {
